@@ -32,7 +32,7 @@ script: |
   tar xzf openssl-1.0.0d.tar.gz
   cd openssl-1.0.0d
   ./Configure --cross-compile-prefix=i586-mingw32msvc- mingw
-  make
+  make $MAKEOPTS
   perl util/mkdef.pl 32 libeay enable-static-engine > libeay32.def
   i586-mingw32msvc-dllwrap --dllname libeay32.dll --output-lib libeay32.a --def libeay32.def libcrypto.a -lws2_32 -lgdi32
   cp libeay32.dll $OUTDIR/
@@ -41,7 +41,7 @@ script: |
   tar xzf db-4.7.25.NC.tar.gz
   cd db-4.7.25.NC/build_unix
   ../dist/configure --enable-mingw --enable-cxx --host=i586-mingw32msvc CFLAGS="-I/usr/i586-mingw32msvc/include"
-  make
+  make $MAKEOPTS
   cd ../..
   #
   tar xjf boost_1_43_0.tar.bz2
@@ -52,7 +52,7 @@ script: |
         <archiver>i586-mingw32msvc-ar
   ;" > user-config.jam
   ./bootstrap.sh --without-icu
-  ./bjam toolset=gcc target-os=windows threadapi=win32 threading=multi --user-config=user-config.jam --without-mpi --without-python -sNO_BZIP2=1 -sNO_ZLIB=1 --layout=tagged --build-type=complete stage
+  ./bjam toolset=gcc target-os=windows threadapi=win32 threading=multi --user-config=user-config.jam --without-mpi --without-python -sNO_BZIP2=1 -sNO_ZLIB=1 --layout=tagged --build-type=complete $MAKEOPTS stage
   cd ..
   #
   mkdir upnpc-exe-win32-20110215
@@ -61,6 +61,7 @@ script: |
   mkdir miniupnpc
   cd miniupnpc
   tar xzf ../../miniupnpc-1.5.20110215.tar.gz
+  mv ./miniupnpc-1.5.20110215/* ./
   cd ../..
   #
   cd bitcoin
@@ -71,7 +72,7 @@ script: |
   cp $OUTDIR/src/doc/README_windows.txt $OUTDIR
   cp $OUTDIR/src/COPYING $OUTDIR
   cd src
-  make -f ../../makefile.linux-mingw $MAKEOPTS DEPSDIR=$HOME bitcoin.exe bitcoind.exe
+  make -f ../../makefile.linux-mingw $MAKEOPTS DEPSDIR=$HOME/build bitcoin.exe bitcoind.exe
   i586-mingw32msvc-strip bitcoin.exe
   i586-mingw32msvc-strip bitcoind.exe
   mkdir -p $OUTDIR/bin/$GBUILD_BITS
