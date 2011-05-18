@@ -19,6 +19,8 @@ remotes:
 files:
 - "wxWidgets-2.9.1.tar.bz2"
 - "miniupnpc-1.5.tar.gz"
+- "toplevel.h.diff"
+- "toplevel.cpp.diff"
 script: |
   INSTDIR="$HOME/install"
   export LIBRARY_PATH="$INSTDIR/lib"
@@ -30,6 +32,11 @@ script: |
   #
   tar xjf wxWidgets-2.9.1.tar.bz2
   cd wxWidgets-2.9.1
+  cd include/wx/gtk
+  patch < ../../../../toplevel.h.diff
+  cd ../../../src/gtk
+  patch < ../../../toplevel.cpp.diff
+  cd ../..
   ./configure --prefix=$INSTDIR --enable-monolithic --disable-shared
   perl -i -p -e "s/__TIME__/\"$REFERENCE_TIME\"/;s/__DATE__/\"$REFERENCE_DATE\"/" include/wx/chartype.h
   make $MAKEOPTS install
