@@ -32,7 +32,7 @@ script: |
   tar xzf openssl-1.0.0d.tar.gz
   cd openssl-1.0.0d
   ./Configure --cross-compile-prefix=i586-mingw32msvc- mingw
-  make $MAKEOPTS
+  make
   perl util/mkdef.pl 32 libeay enable-static-engine > libeay32.def
   i586-mingw32msvc-dllwrap --dllname libeay32.dll --output-lib libeay32.a --def libeay32.def libcrypto.a -lws2_32 -lgdi32
   cp libeay32.dll $OUTDIR/
