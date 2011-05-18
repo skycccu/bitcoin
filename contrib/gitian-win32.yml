@@ -36,14 +36,16 @@ script: |
   perl util/mkdef.pl 32 libeay enable-static-engine > libeay32.def
   i586-mingw32msvc-dllwrap --dllname libeay32.dll --output-lib libeay32.a --def libeay32.def libcrypto.a -lws2_32 -lgdi32
   cp libeay32.dll $OUTDIR/
+  cd ..
   #
   tar xzf db-4.7.25.NC.tar.gz
   cd db-4.7.25.NC/build_unix
   ../dist/configure --enable-mingw --enable-cxx --host=i586-mingw32msvc CFLAGS="-I/usr/i586-mingw32msvc/include"
   make
+  cd ../..
   #
   tar xjf boost_1_43_0.tar.bz2
-  cd /boost_1_43_0
+  cd boost_1_43_0
   echo "using gcc : 4.4 : i586-mingw32msvc-g++
         :
         <rc>i586-mingw32msvc-windres
@@ -51,12 +53,15 @@ script: |
   ;" > user-config.jam
   ./bootstrap.sh --without-icu
   ./bjam toolset=gcc target-os=windows threadapi=win32 threading=multi --user-config=user-config.jam --without-mpi --without-python -sNO_BZIP2=1 -sNO_ZLIB=1 --layout=tagged --build-type=complete stage
+  cd ..
   #
   mkdir upnpc-exe-win32-20110215
   cd upnpc-exe-win32-20110215
   unzip ../upnpc-exe-win32-20110215.zip
   mkdir miniupnpc
+  cd miniupnpc
   tar xzf ../../miniupnpc-1.5.20110215.tar.gz
+  cd ../..
   #
   cd bitcoin
   mkdir -p $OUTDIR/src
@@ -65,7 +70,8 @@ script: |
   mv $OUTDIR/src/locale $OUTDIR
   cp $OUTDIR/src/doc/README_windows.txt $OUTDIR
   cp $OUTDIR/src/COPYING $OUTDIR
-  make -f ../makefile.linux-mingw $MAKEOPTS DEPSDIR=$HOME bitcoin.exe bitcoind.exe
+  cd src
+  make -f ../../makefile.linux-mingw $MAKEOPTS DEPSDIR=$HOME bitcoin.exe bitcoind.exe
   i586-mingw32msvc-strip bitcoin.exe
   i586-mingw32msvc-strip bitcoind.exe
   mkdir -p $OUTDIR/bin/$GBUILD_BITS

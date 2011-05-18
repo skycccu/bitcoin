@@ -58,7 +58,7 @@ make
 OpenSSL
 -------
 cd /openssl-1.0.0d
-./config -cross-compile-prefix=i586-mingw32msvc- mingw
+./Configure --cross-compile-prefix=i586-mingw32msvc- mingw
 make
 
 perl util/mkdef.pl 32 libeay enable-static-engine > libeay32.def
