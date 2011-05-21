@@ -11,6 +11,9 @@
 #include <miniupnpc/upnperrors.h>
 #endif
 
+using namespace std;
+using namespace boost;
+
 static const int MAX_OUTBOUND_CONNECTIONS = 8;
 
 void ThreadMessageHandler2(void* parg);
@@ -53,6 +56,10 @@ CAddress addrProxy("127.0.0.1",9050);
 
 
 
+unsigned short GetListenPort()
+{
+    return (unsigned short)(GetArg("-port", GetDefaultPort()));
+}
 
 void CNode::PushGetBlocks(CBlockIndex* pindexBegin, uint256 hashEnd)
 {
@@ -330,7 +337,7 @@ void ThreadGetMyExternalIP(void* parg)
             CAddress addr(addrLocalHost);
             addr.nTime = GetAdjustedTime();
             CRITICAL_BLOCK(cs_vNodes)
-                foreach(CNode* pnode, vNodes)
+                BOOST_FOREACH(CNode* pnode, vNodes)
                     pnode->PushAddress(addr);
         }
     }
@@ -414,7 +421,7 @@ void AbandonRequests(void (*fn)(void*, CDataStream&), void* param1)
     // call this in the destructor so it doesn't get called after it's deleted.
     CRITICAL_BLOCK(cs_vNodes)
     {
-        foreach(CNode* pnode, vNodes)
+        BOOST_FOREACH(CNode* pnode, vNodes)
         {
             CRITICAL_BLOCK(pnode->cs_mapRequests)
             {
@@ -451,7 +458,7 @@ bool AnySubscribed(unsigned int nChannel)
     if (pnodeLocalHost->IsSubscribed(nChannel))
         return true;
     CRITICAL_BLOCK(cs_vNodes)
-        foreach(CNode* pnode, vNodes)
+        BOOST_FOREACH(CNode* pnode, vNodes)
             if (pnode->IsSubscribed(nChannel))
                 return true;
     return false;
@@ -473,7 +480,7 @@ void CNode::Subscribe(unsigned int nChannel, unsigned int nHops)
     {
         // Relay subscribe
         CRITICAL_BLOCK(cs_vNodes)
-            foreach(CNode* pnode, vNodes)
+            BOOST_FOREACH(CNode* pnode, vNodes)
                 if (pnode != this)
                     pnode->PushMessage("subscribe", nChannel, nHops);
     }
@@ -495,7 +502,7 @@ void CNode::CancelSubscribe(unsigned int nChannel)
     {
         // Relay subscription cancel
         CRITICAL_BLOCK(cs_vNodes)
-            foreach(CNode* pnode, vNodes)
+            BOOST_FOREACH(CNode* pnode, vNodes)
                 if (pnode != this)
                     pnode->PushMessage("sub-cancel", nChannel);
     }
@@ -513,7 +520,7 @@ CNode* FindNode(unsigned int ip)
 {
     CRITICAL_BLOCK(cs_vNodes)
     {
-        foreach(CNode* pnode, vNodes)
+        BOOST_FOREACH(CNode* pnode, vNodes)
             if (pnode->addr.ip == ip)
                 return (pnode);
     }
@@ -524,7 +531,7 @@ CNode* FindNode(CAddress addr)
 {
     CRITICAL_BLOCK(cs_vNodes)
     {
-        foreach(CNode* pnode, vNodes)
+        BOOST_FOREACH(CNode* pnode, vNodes)
             if (pnode->addr == addr)
                 return (pnode);
     }
@@ -661,7 +668,7 @@ void ThreadSocketHandler2(void* parg)
         {
             // Disconnect unused nodes
             vector<CNode*> vNodesCopy = vNodes;
-            foreach(CNode* pnode, vNodesCopy)
+            BOOST_FOREACH(CNode* pnode, vNodesCopy)
             {
                 if (pnode->fDisconnect ||
                     (pnode->GetRefCount() <= 0 && pnode->vRecv.empty() && pnode->vSend.empty()))
@@ -683,7 +690,7 @@ void ThreadSocketHandler2(void* parg)
 
             // Delete disconnected nodes
             list<CNode*> vNodesDisconnectedCopy = vNodesDisconnected;
-            foreach(CNode* pnode, vNodesDisconnectedCopy)
+            BOOST_FOREACH(CNode* pnode, vNodesDisconnectedCopy)
             {
                 // wait until threads are done using it
                 if (pnode->GetRefCount() <= 0)
@@ -729,7 +736,7 @@ void ThreadSocketHandler2(void* parg)
         hSocketMax = max(hSocketMax, hListenSocket);
         CRITICAL_BLOCK(cs_vNodes)
         {
-            foreach(CNode* pnode, vNodes)
+            BOOST_FOREACH(CNode* pnode, vNodes)
             {
                 if (pnode->hSocket == INVALID_SOCKET || pnode->hSocket < 0)
                     continue;
@@ -771,7 +778,7 @@ void ThreadSocketHandler2(void* parg)
             int nInbound = 0;
 
             CRITICAL_BLOCK(cs_vNodes)
-                foreach(CNode* pnode, vNodes)
+                BOOST_FOREACH(CNode* pnode, vNodes)
                 if (pnode->fInbound)
                     nInbound++;
             if (hSocket == INVALID_SOCKET)
@@ -801,10 +808,10 @@ void ThreadSocketHandler2(void* parg)
         CRITICAL_BLOCK(cs_vNodes)
         {
             vNodesCopy = vNodes;
-            foreach(CNode* pnode, vNodesCopy)
+            BOOST_FOREACH(CNode* pnode, vNodesCopy)
                 pnode->AddRef();
         }
-        foreach(CNode* pnode, vNodesCopy)
+        BOOST_FOREACH(CNode* pnode, vNodesCopy)
         {
             if (fShutdown)
                 return;
@@ -921,7 +928,7 @@ void ThreadSocketHandler2(void* parg)
         }
         CRITICAL_BLOCK(cs_vNodes)
         {
-            foreach(CNode* pnode, vNodesCopy)
+            BOOST_FOREACH(CNode* pnode, vNodesCopy)
                 pnode->Release();
         }
 
@@ -962,7 +969,7 @@ void ThreadMapPort2(void* parg)
     printf("ThreadMapPort started\n");
 
     char port[6];
-    sprintf(port, "%d", GetDefaultPort());
+    sprintf(port, "%d", GetListenPort());
 
     const char * rootdescurl = 0;
     const char * multicastif = 0;
@@ -1057,7 +1064,7 @@ void DNSAddressSeed()
         vector<CAddress> vaddr;
         if (Lookup(strDNSSeed[seed_idx], vaddr, NODE_NETWORK, true))
         {
-            foreach (CAddress& addr, vaddr)
+            BOOST_FOREACH (CAddress& addr, vaddr)
             {
                 if (addr.GetByte(3) != 127)
                 {
@@ -1148,7 +1155,7 @@ void ThreadOpenConnections2(void* parg)
     {
         for (int64 nLoop = 0;; nLoop++)
         {
-            foreach(string strAddr, mapMultiArgs["-connect"])
+            BOOST_FOREACH(string strAddr, mapMultiArgs["-connect"])
             {
                 CAddress addr(strAddr, fAllowDNS);
                 if (addr.IsValid())
@@ -1166,7 +1173,7 @@ void ThreadOpenConnections2(void* parg)
     // Connect to manually added nodes first
     if (mapArgs.count("-addnode"))
     {
-        foreach(string strAddr, mapMultiArgs["-addnode"])
+        BOOST_FOREACH(string strAddr, mapMultiArgs["-addnode"])
         {
             CAddress addr(strAddr, fAllowDNS);
             if (addr.IsValid())
@@ -1190,7 +1197,7 @@ void ThreadOpenConnections2(void* parg)
         {
             int nOutbound = 0;
             CRITICAL_BLOCK(cs_vNodes)
-                foreach(CNode* pnode, vNodes)
+                BOOST_FOREACH(CNode* pnode, vNodes)
                     if (!pnode->fInbound)
                         nOutbound++;
             int nMaxOutboundConnections = MAX_OUTBOUND_CONNECTIONS;
@@ -1233,7 +1240,7 @@ void ThreadOpenConnections2(void* parg)
                 {
                     nSeedDisconnected = GetTime();
                     CRITICAL_BLOCK(cs_vNodes)
-                        foreach(CNode* pnode, vNodes)
+                        BOOST_FOREACH(CNode* pnode, vNodes)
                             if (setSeed.count(pnode->addr.ip))
                                 pnode->fDisconnect = true;
                 }
@@ -1241,7 +1248,7 @@ void ThreadOpenConnections2(void* parg)
                 // Keep setting timestamps to 0 so they won't reconnect
                 if (GetTime() - nSeedDisconnected < 60 * 60)
                 {
-                    foreach(PAIRTYPE(const vector<unsigned char>, CAddress)& item, mapAddresses)
+                    BOOST_FOREACH(PAIRTYPE(const vector<unsigned char>, CAddress)& item, mapAddresses)
                     {
                         if (setSeed.count(item.second.ip) && item.second.nTime != 0)
                         {
@@ -1264,12 +1271,12 @@ void ThreadOpenConnections2(void* parg)
         // Do this here so we don't have to critsect vNodes inside mapAddresses critsect.
         set<unsigned int> setConnected;
         CRITICAL_BLOCK(cs_vNodes)
-            foreach(CNode* pnode, vNodes)
+            BOOST_FOREACH(CNode* pnode, vNodes)
                 setConnected.insert(pnode->addr.ip & 0x0000ffff);
 
         CRITICAL_BLOCK(cs_mapAddresses)
         {
-            foreach(const PAIRTYPE(vector<unsigned char>, CAddress)& item, mapAddresses)
+            BOOST_FOREACH(const PAIRTYPE(vector<unsigned char>, CAddress)& item, mapAddresses)
             {
                 const CAddress& addr = item.second;
                 if (!addr.IsIPv4() || !addr.IsValid() || setConnected.count(addr.ip & 0x0000ffff))
@@ -1385,7 +1392,7 @@ void ThreadMessageHandler2(void* parg)
         CRITICAL_BLOCK(cs_vNodes)
         {
             vNodesCopy = vNodes;
-            foreach(CNode* pnode, vNodesCopy)
+            BOOST_FOREACH(CNode* pnode, vNodesCopy)
                 pnode->AddRef();
         }
 
@@ -1393,7 +1400,7 @@ void ThreadMessageHandler2(void* parg)
         CNode* pnodeTrickle = NULL;
         if (!vNodesCopy.empty())
             pnodeTrickle = vNodesCopy[GetRand(vNodesCopy.size())];
-        foreach(CNode* pnode, vNodesCopy)
+        BOOST_FOREACH(CNode* pnode, vNodesCopy)
         {
             // Receive messages
             TRY_CRITICAL_BLOCK(pnode->cs_vRecv)
@@ -1410,7 +1417,7 @@ void ThreadMessageHandler2(void* parg)
 
         CRITICAL_BLOCK(cs_vNodes)
         {
-            foreach(CNode* pnode, vNodesCopy)
+            BOOST_FOREACH(CNode* pnode, vNodesCopy)
                 pnode->Release();
         }
 
@@ -1432,14 +1439,11 @@ void ThreadMessageHandler2(void* parg)
 
 
 
-
-
-
 bool BindListenPort(string& strError)
 {
     strError = "";
     int nOne = 1;
-    addrLocalHost.port = htons(GetDefaultPort());
+    addrLocalHost.port = htons(GetListenPort());
 
 #ifdef __WXMSW__
     // Initialize Windows Sockets
@@ -1491,7 +1495,7 @@ bool BindListenPort(string& strError)
     memset(&sockaddr, 0, sizeof(sockaddr));
     sockaddr.sin_family = AF_INET;
     sockaddr.sin_addr.s_addr = INADDR_ANY; // bind to all IPs on this computer
-    sockaddr.sin_port = htons(GetDefaultPort());
+    sockaddr.sin_port = htons(GetListenPort());
     if (::bind(hListenSocket, (struct sockaddr*)&sockaddr, sizeof(sockaddr)) == SOCKET_ERROR)
     {
         int nErr = WSAGetLastError();
@@ -1527,7 +1531,7 @@ void StartNode(void* parg)
     {
         vector<CAddress> vaddr;
         if (Lookup(pszHostName, vaddr, nLocalServices, -1, true))
-            foreach (const CAddress &addr, vaddr)
+            BOOST_FOREACH (const CAddress &addr, vaddr)
                 if (addr.GetByte(3) != 127)
                 {
                     addrLocalHost = addr;
@@ -1553,7 +1557,7 @@ void StartNode(void* parg)
                     printf("ipv4 %s: %s\n", ifa->ifa_name, pszIP);
 
                 // Take the first IP that isn't loopback 127.x.x.x
-                CAddress addr(*(unsigned int*)&s4->sin_addr, 0, nLocalServices);
+                CAddress addr(*(unsigned int*)&s4->sin_addr, GetListenPort(), nLocalServices);
                 if (addr.IsValid() && addr.GetByte(3) != 127)
                 {
                     addrLocalHost = addr;
@@ -1648,7 +1652,7 @@ public:
     ~CNetCleanup()
     {
         // Close sockets
-        foreach(CNode* pnode, vNodes)
+        BOOST_FOREACH(CNode* pnode, vNodes)
             if (pnode->hSocket != INVALID_SOCKET)
                 closesocket(pnode->hSocket);
         if (hListenSocket != INVALID_SOCKET)
