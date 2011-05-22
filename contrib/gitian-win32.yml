@@ -8,6 +8,7 @@ packages:
 - "mingw32"
 - "git-core"
 - "unzip"
+- "nsis"
 reference_datetime: "2011-01-30 00:00:00"
 remotes:
 - "url": "https://github.com/bitcoin/bitcoin.git"
@@ -20,6 +21,7 @@ files:
 - "upnpc-exe-win32-20110215.zip"
 - "miniupnpc-1.5.20110215.tar.gz"
 - "makefile.linux-mingw"
+- "setup.nsi"
 script: |
   #
   tar xjf wxWidgets-2.9.1.tar.bz2
@@ -68,12 +70,15 @@ script: |
   mkdir -p $OUTDIR/src
   cp -a . $OUTDIR/src
   rm -rf $OUTDIR/src/.git
-  mv $OUTDIR/src/locale $OUTDIR
-  cp $OUTDIR/src/doc/README_windows.txt $OUTDIR
-  cp $OUTDIR/src/COPYING $OUTDIR
+  cp -a $OUTDIR/src/locale $OUTDIR
+  cp $OUTDIR/src/doc/README_windows.txt $OUTDIR/readme.txt
+  cp $OUTDIR/src/COPYING $OUTDIR/license.txt
   cd src
   make -f ../../makefile.linux-mingw $MAKEOPTS DEPSDIR=$HOME/build bitcoin.exe bitcoind.exe
   i586-mingw32msvc-strip bitcoin.exe
   i586-mingw32msvc-strip bitcoind.exe
-  mkdir -p $OUTDIR/bin/$GBUILD_BITS
-  cp bitcoin.exe bitcoind.exe $OUTDIR/bin/$GBUILD_BITS
+  cp ../../setup.nsi ../share/
+  makensis ../share/setup.nsi
+  cp bitcoin.exe ../share/bitcoin-0.3.22-win32-setup.exe $OUTDIR/
+  mkdir $OUTDIR/daemon
+  cp bitcoind.exe $OUTDIR/daemon
