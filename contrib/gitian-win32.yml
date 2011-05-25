@@ -21,7 +21,6 @@ files:
 - "upnpc-exe-win32-20110215.zip"
 - "miniupnpc-1.5.20110215.tar.gz"
 - "makefile.linux-mingw"
-- "setup.nsi"
 script: |
   #
   tar xjf wxWidgets-2.9.1.tar.bz2
@@ -74,10 +73,10 @@ script: |
   cp $OUTDIR/src/doc/README_windows.txt $OUTDIR/readme.txt
   cp $OUTDIR/src/COPYING $OUTDIR/license.txt
   cd src
+  sed 's/$(DEBUGFLAGS)//' < ../../makefile.linux-mingw > ../../makefile.linux-mingw.2 && mv ../../makefile.linux-mingw.2 ../../makefile.linux-mingw
   make -f ../../makefile.linux-mingw $MAKEOPTS DEPSDIR=$HOME/build bitcoin.exe bitcoind.exe
   i586-mingw32msvc-strip bitcoin.exe
   i586-mingw32msvc-strip bitcoind.exe
-  cp ../../setup.nsi ../share/
   makensis ../share/setup.nsi
   cp bitcoin.exe ../share/bitcoin-0.3.22-win32-setup.exe $OUTDIR/
   mkdir $OUTDIR/daemon
