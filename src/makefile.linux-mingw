@@ -28,9 +28,10 @@ LIBS= \
  -l boost_program_options-mt-s \
  -l boost_thread_win32-mt-s \
  -l db_cxx \
- -l eay32
+ -l ssl \
+ -l crypto
 
-DEFS=-D_MT -DWIN32 -D__WXMSW__ -D_WINDOWS -DNOPCH
+DEFS=-D_MT -DWIN32 -D__WXMSW__ -D_WINDOWS -DNOPCH -DUSE_SSL
 DEBUGFLAGS=-g -D__WXDEBUG__
 CFLAGS=-O2 -w -Wno-invalid-offsetof -Wformat $(DEBUGFLAGS) $(DEFS) $(INCLUDEPATHS)
 HEADERS=headers.h strlcpy.h serialize.h uint256.h util.h key.h bignum.h base58.h \
