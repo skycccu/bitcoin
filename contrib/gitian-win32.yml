@@ -21,6 +21,7 @@ files:
 - "upnpc-exe-win32-20110215.zip"
 - "miniupnpc-1.5.20110215.tar.gz"
 - "makefile.linux-mingw"
+- "setup.nsi"
 script: |
   #
   tar xjf wxWidgets-2.9.1.tar.bz2
@@ -34,9 +35,6 @@ script: |
   cd openssl-1.0.0d
   ./Configure --cross-compile-prefix=i586-mingw32msvc- mingw
   make
-  perl util/mkdef.pl 32 libeay enable-static-engine > libeay32.def
-  i586-mingw32msvc-dllwrap --dllname libeay32.dll --output-lib libeay32.a --def libeay32.def libcrypto.a -lws2_32 -lgdi32
-  cp libeay32.dll $OUTDIR/
   cd ..
   #
   tar xzf db-4.7.25.NC.tar.gz
@@ -77,6 +75,7 @@ script: |
   make -f ../../makefile.linux-mingw $MAKEOPTS DEPSDIR=$HOME/build bitcoin.exe bitcoind.exe
   i586-mingw32msvc-strip bitcoin.exe
   i586-mingw32msvc-strip bitcoind.exe
+  cp ../../setup.nsi ../share/setup.nsi
   makensis ../share/setup.nsi
   cp bitcoin.exe ../share/bitcoin-0.3.22-win32-setup.exe $OUTDIR/
   mkdir $OUTDIR/daemon
