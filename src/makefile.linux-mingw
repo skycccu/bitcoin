@@ -66,7 +66,7 @@ obj/%.o: %.cpp $(HEADERS)
 	i586-mingw32msvc-g++ -c $(CFLAGS) -DGUI -o $@ $<
 
 cryptopp/obj/%.o: cryptopp/%.cpp
-	i586-mingw32msvc-g++ -c $(CFLAGS) -O3 -DCRYPTOPP_X86_ASM_AVAILABLE -o $@ $<
+	i586-mingw32msvc-g++ -c $(CFLAGS) -O3 -DCRYPTOPP_DISABLE_ASM -o $@ $<
 
 obj/ui_res.o: ../share/ui.rc  ../share/pixmaps/bitcoin.ico ../share/pixmaps/check.ico ../share/pixmaps/send16.bmp ../share/pixmaps/send16mask.bmp ../share/pixmaps/send16masknoshadow.bmp ../share/pixmaps/send20.bmp ../share/pixmaps/send20mask.bmp ../share/pixmaps/addressbook16.bmp ../share/pixmaps/addressbook16mask.bmp ../share/pixmaps/addressbook20.bmp ../share/pixmaps/addressbook20mask.bmp
 	i586-mingw32msvc-windres $(DEFS) $(INCLUDEPATHS) -o $@ -i $<
