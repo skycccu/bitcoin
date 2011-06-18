@@ -3,6 +3,11 @@
 // file license.txt or http://www.opensource.org/licenses/mit-license.php.
 
 #include "headers.h"
+#include "irc.h"
+#include "db.h"
+#include "net.h"
+#include "init.h"
+#include "strlcpy.h"
 
 #ifdef USE_UPNP
 #include <miniupnpc/miniwget.h>
@@ -51,6 +56,7 @@ map<CInv, int64> mapAlreadyAskedFor;
 
 // Settings
 int fUseProxy = false;
+int nConnectTimeout = 5000;
 CAddress addrProxy("127.0.0.1",9050);
 
 
@@ -76,7 +82,7 @@ void CNode::PushGetBlocks(CBlockIndex* pindexBegin, uint256 hashEnd)
 
 
 
-bool ConnectSocket(const CAddress& addrConnect, SOCKET& hSocketRet)
+bool ConnectSocket(const CAddress& addrConnect, SOCKET& hSocketRet, int nTimeout)
 {
     hSocketRet = INVALID_SOCKET;
 
@@ -88,11 +94,89 @@ bool ConnectSocket(const CAddress& addrConnect, SOCKET& hSocketRet)
     setsockopt(hSocket, SOL_SOCKET, SO_NOSIGPIPE, (void*)&set, sizeof(int));
 #endif
 
-    bool fRoutable = !(addrConnect.GetByte(3) == 10 || (addrConnect.GetByte(3) == 192 && addrConnect.GetByte(2) == 168));
-    bool fProxy = (fUseProxy && fRoutable);
+    bool fProxy = (fUseProxy && addrConnect.IsRoutable());
     struct sockaddr_in sockaddr = (fProxy ? addrProxy.GetSockAddr() : addrConnect.GetSockAddr());
 
+#ifdef __WXMSW__
+    u_long fNonblock = 1;
+    if (ioctlsocket(hSocket, FIONBIO, &fNonblock) == SOCKET_ERROR)
+#else
+    int fFlags = fcntl(hSocket, F_GETFL, 0);
+    if (fcntl(hSocket, F_SETFL, fFlags | O_NONBLOCK) == -1)
+#endif
+    {
+        closesocket(hSocket);
+        return false;
+    }
+
+
     if (connect(hSocket, (struct sockaddr*)&sockaddr, sizeof(sockaddr)) == SOCKET_ERROR)
+    {
+        // WSAEINVAL is here because some legacy version of winsock uses it
+        if (WSAGetLastError() == WSAEINPROGRESS || WSAGetLastError() == WSAEWOULDBLOCK || WSAGetLastError() == WSAEINVAL)
+        {
+            struct timeval timeout;
+            timeout.tv_sec  = nTimeout / 1000;
+            timeout.tv_usec = (nTimeout % 1000) * 1000;
+
+            fd_set fdset;
+            FD_ZERO(&fdset);
+            FD_SET(hSocket, &fdset);
+            int nRet = select(hSocket + 1, NULL, &fdset, NULL, &timeout);
+            if (nRet == 0)
+            {
+                printf("connection timeout\n");
+                closesocket(hSocket);
+                return false;
+            }
+            if (nRet == SOCKET_ERROR)
+            {
+                printf("select() for connection failed: %i\n",WSAGetLastError());
+                closesocket(hSocket);
+                return false;
+            }
+            socklen_t nRetSize = sizeof(nRet);
+#ifdef __WXMSW__
+            if (getsockopt(hSocket, SOL_SOCKET, SO_ERROR, (char*)(&nRet), &nRetSize) == SOCKET_ERROR)
+#else
+            if (getsockopt(hSocket, SOL_SOCKET, SO_ERROR, &nRet, &nRetSize) == SOCKET_ERROR)
+#endif
+            {
+                printf("getsockopt() for connection failed: %i\n",WSAGetLastError());
+                closesocket(hSocket);
+                return false;
+            }
+            if (nRet != 0)
+            {
+                printf("connect() failed after select(): %i\n",nRet);
+                closesocket(hSocket);
+                return false;
+            }
+        }
+#ifdef __WXMSW__
+        else if (WSAGetLastError() != WSAEISCONN)
+#else
+        else
+#endif
+        {
+            printf("connect() failed: %s\n",WSAGetLastError());
+            closesocket(hSocket);
+            return false;
+        }
+    }
+
+    /*
+    this isn't even strictly necessary
+    CNode::ConnectNode immediately turns the socket back to non-blocking
+    but we'll turn it back to blocking just in case
+    */
+#ifdef __WXMSW__
+    fNonblock = 0;
+    if (ioctlsocket(hSocket, FIONBIO, &fNonblock) == SOCKET_ERROR)
+#else
+    fFlags = fcntl(hSocket, F_GETFL, 0);
+    if (fcntl(hSocket, F_SETFL, fFlags & !O_NONBLOCK) == SOCKET_ERROR)
+#endif
     {
         closesocket(hSocket);
         return false;
@@ -757,9 +841,12 @@ void ThreadSocketHandler2(void* parg)
         if (nSelect == SOCKET_ERROR)
         {
             int nErr = WSAGetLastError();
-            printf("socket select error %d\n", nErr);
-            for (int i = 0; i <= hSocketMax; i++)
-                FD_SET(i, &fdsetRecv);
+            if (hSocketMax > -1)
+            {
+                printf("socket select error %d\n", nErr);
+                for (int i = 0; i <= hSocketMax; i++)
+                    FD_SET(i, &fdsetRecv);
+            }
             FD_ZERO(&fdsetSend);
             FD_ZERO(&fdsetError);
             Sleep(timeout.tv_usec/1000);
@@ -1062,7 +1149,7 @@ void DNSAddressSeed()
 
     for (int seed_idx = 0; seed_idx < ARRAYLEN(strDNSSeed); seed_idx++) {
         vector<CAddress> vaddr;
-        if (Lookup(strDNSSeed[seed_idx], vaddr, NODE_NETWORK, true))
+        if (Lookup(strDNSSeed[seed_idx], vaddr, NODE_NETWORK, -1, true))
         {
             BOOST_FOREACH (CAddress& addr, vaddr)
             {

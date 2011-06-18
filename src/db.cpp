@@ -3,6 +3,9 @@
 // file license.txt or http://www.opensource.org/licenses/mit-license.php.
 
 #include "headers.h"
+#include "db.h"
+#include "net.h"
+#include <boost/filesystem/fstream.hpp>
 
 using namespace std;
 using namespace boost;
@@ -845,12 +848,11 @@ bool LoadWallet(bool& fFirstRunRet)
     {
         // Create new keyUser and set as default key
         RandAddSeedPerfmon();
-        keyUser.MakeNewKey();
-        if (!AddKey(keyUser))
-            return false;
-        if (!SetAddressBookName(PubKeyToAddress(keyUser.GetPubKey()), ""))
-            return false;
-        CWalletDB().WriteDefaultKey(keyUser.GetPubKey());
+
+        CWalletDB walletdb;
+        vchDefaultKey = GetKeyFromKeyPool();
+        walletdb.WriteDefaultKey(vchDefaultKey);
+        walletdb.WriteName(PubKeyToAddress(vchDefaultKey), "");
     }
 
     CreateThread(ThreadFlushWalletDB, NULL);

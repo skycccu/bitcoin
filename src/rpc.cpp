@@ -4,12 +4,17 @@
 
 #include "headers.h"
 #include "cryptopp/sha.h"
+#include "db.h"
+#include "net.h"
+#include "init.h"
 #undef printf
 #include <boost/asio.hpp>
 #include <boost/iostreams/concepts.hpp>
 #include <boost/iostreams/stream.hpp>
+#include <boost/algorithm/string.hpp>
 #ifdef USE_SSL
 #include <boost/asio/ssl.hpp> 
+#include <boost/filesystem/fstream.hpp>
 typedef boost::asio::ssl::stream<boost::asio::ip::tcp::socket> SSLStream;
 #endif
 #include "json/json_spirit_reader_template.h"
@@ -199,12 +204,26 @@ double GetDifficulty()
 {
     // Floating point number that is a multiple of the minimum difficulty,
     // minimum difficulty = 1.0.
+
     if (pindexBest == NULL)
         return 1.0;
-    int nShift = 256 - 32 - 31; // to fit in a uint
-    double dMinimum = (CBigNum().SetCompact(bnProofOfWorkLimit.GetCompact()) >> nShift).getuint();
-    double dCurrently = (CBigNum().SetCompact(pindexBest->nBits) >> nShift).getuint();
-    return dMinimum / dCurrently;
+    int nShift = (pindexBest->nBits >> 24) & 0xff;
+
+    double dDiff =
+        (double)0x0000ffff / (double)(pindexBest->nBits & 0x00ffffff);
+
+    while (nShift < 29)
+    {
+        dDiff *= 256.0;
+        nShift++;
+    }
+    while (nShift > 29)
+    {
+        dDiff /= 256.0;
+        nShift--;
+    }
+
+    return dDiff;
 }
 
 Value getdifficulty(const Array& params, bool fHelp)
