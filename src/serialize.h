@@ -38,6 +38,18 @@ typedef unsigned long long  uint64;
 #define munlock(p, n) VirtualUnlock((p), (n));
 #else
 #include <sys/mman.h>
+#include <limits.h>
+/* This comes from limits.h if it's not defined there set a sane default */
+#ifndef PAGESIZE
+#include <unistd.h>
+#define PAGESIZE sysconf(_SC_PAGESIZE)
+#endif
+#define mlock(a,b) \
+  mlock(((void *)(((size_t)(a)) & ((size_t)(((PAGESIZE)<<1)-1)))),\
+  (b) + ((size_t)(a) - (((size_t)(a)) & ((size_t)(((PAGESIZE)<<1)-1)))))
+#define munlock(a,b) \
+  munlock(((void *)(((size_t)(a)) & ((size_t)(((PAGESIZE)<<1)-1)))),\
+  (b) + ((size_t)(a) - (((size_t)(a)) & ((size_t)(((PAGESIZE)<<1)-1)))))
 #endif
 
 class CScript;
