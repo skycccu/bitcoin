@@ -20,8 +20,13 @@
 
 * perform gitian builds
 
-  { insert useful info here }
- 
+  * From the bitcoin source dir
+  $ cd ../gitian-builder
+  $ ./bin/gbuild --commit bitcoin=v0.3.23 ../contrib/gitian.yml
+  $ wget -O inputs/makefile.linux-mingw https://raw.github.com/TheBlueMatt/bitcoin/crosscompile/src/makefile.linux-mingw
+  $ wget https://github.com/TheBlueMatt/bitcoin/raw/crosscompile/contrib/gitian-win32.yml
+  $ ./bin/gbuild --commit bitcoin=v0.3.23 ./gitian-win32.yml
+
   Build output expected:
   1. linux 32-bit and 64-bit binaries + source
   2. windows 32-bit binary + source
