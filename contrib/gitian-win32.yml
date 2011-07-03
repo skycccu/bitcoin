@@ -75,6 +75,6 @@ script: |
   i586-mingw32msvc-strip bitcoin.exe
   i586-mingw32msvc-strip bitcoind.exe
   makensis ../share/setup.nsi
-  cp bitcoin.exe ../share/bitcoin-0.3.22-win32-setup.exe $OUTDIR/
+  cp bitcoin.exe ../share/bitcoin-*-win32-setup.exe $OUTDIR/
   mkdir $OUTDIR/daemon
   cp bitcoind.exe $OUTDIR/daemon
