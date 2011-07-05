@@ -792,15 +792,33 @@ bool CWalletDB::LoadWallet(CWallet* pwallet)
                 if (getenv("WALLET_PASSPHRASE") == NULL)
                     return false;
 
-                CMasterKey mkey = CMasterKey();
-                mkey.nDeriveIterations 
+                std::vector<unsigned char> vchSalt(8);
+                vchSalt[0] = *"b";
+                vchSalt[0] = *"i";
+                vchSalt[0] = *"t";
+                vchSalt[0] = *"c";
+                vchSalt[0] = *"o";
+                vchSalt[0] = *"i";
+                vchSalt[0] = *"n";
+                vchSalt[0] = *" ";
 
-                CPrivKey vchEncPrivKey;
-                vchEncPrivKey.resize(vchCiphertext.size());
-                memcpy(&vchEncPrivKey[0], &vchCiphertext[0], vchCiphertext.size());
+                CCrypter crypter;
+                crypter.SetKeyFromPassphrase(getenv("WALLET_PASSPHRASE"), vchSalt, 1000, 0); 
+                CKeyingMaterial vchKey(32);
+                for (int i = 0; i < 32; i++) {
+                    vchKey[i] = crypter.chKey[i];
+                }
+                CSecret vchPlaintext;
 
-                mapKeys[vchPubKey] = vchEncPrivKey;
-                mapPubKeys[Hash160(vchPubKey)] = vchPubKey;
+                uint256 nIV;
+                memcpy(&nIV, &vchPubKey[0], WALLET_CRYPTO_KEY_SIZE);
+                DecryptSecret(vchKey, vchCiphertext, nIV, vchPlaintext);
+
+                CKey key;
+                key.SetPrivKey(vchPlaintext);
+                
+                if (!pwallet->LoadKey(key))
+                    return false;
             }
             else if (strType == "mkey")
             {

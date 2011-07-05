@@ -44,7 +44,7 @@ typedef std::vector<unsigned char, secure_allocator<unsigned char> > CKeyingMate
 
 class CCrypter
 {
-private:
+public:
     unsigned char chKey[WALLET_CRYPTO_KEY_SIZE];
     unsigned char chIV[WALLET_CRYPTO_KEY_SIZE];
     bool fKeySet;
