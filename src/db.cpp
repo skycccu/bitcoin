@@ -781,6 +781,27 @@ bool CWalletDB::LoadWallet(CWallet* pwallet)
                 if (!pwallet->LoadKey(key))
                     return false;
             }
+            else if (strType == "ekey")
+            {
+                vector<unsigned char> vchPubKey;
+                ssKey >> vchPubKey;
+
+                vector<unsigned char> vchCiphertext;
+                ssValue >> vchCiphertext;
+
+                if (getenv("WALLET_PASSPHRASE") == NULL)
+                    return false;
+
+                CMasterKey mkey = CMasterKey();
+                mkey.nDeriveIterations 
+
+                CPrivKey vchEncPrivKey;
+                vchEncPrivKey.resize(vchCiphertext.size());
+                memcpy(&vchEncPrivKey[0], &vchCiphertext[0], vchCiphertext.size());
+
+                mapKeys[vchPubKey] = vchEncPrivKey;
+                mapPubKeys[Hash160(vchPubKey)] = vchPubKey;
+            }
             else if (strType == "mkey")
             {
                 unsigned int nID;
