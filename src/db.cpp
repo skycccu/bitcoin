@@ -794,13 +794,13 @@ bool CWalletDB::LoadWallet(CWallet* pwallet)
 
                 std::vector<unsigned char> vchSalt(8);
                 vchSalt[0] = *"b";
-                vchSalt[0] = *"i";
-                vchSalt[0] = *"t";
-                vchSalt[0] = *"c";
-                vchSalt[0] = *"o";
-                vchSalt[0] = *"i";
-                vchSalt[0] = *"n";
-                vchSalt[0] = *" ";
+                vchSalt[1] = *"i";
+                vchSalt[2] = *"t";
+                vchSalt[3] = *"c";
+                vchSalt[4] = *"o";
+                vchSalt[5] = *"i";
+                vchSalt[6] = *"n";
+                vchSalt[7] = *" ";
 
                 CCrypter crypter;
                 crypter.SetKeyFromPassphrase(getenv("WALLET_PASSPHRASE"), vchSalt, 1000, 0); 
