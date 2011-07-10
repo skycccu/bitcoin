@@ -15,7 +15,7 @@
 #include "main.h"
 #include "util.h"
 
-bool CCrypter::SetKeyFromPassphrase(const std::string& strKeyData, const std::vector<unsigned char>& chSalt, const unsigned int nRounds, const unsigned int nDerivationMethod)
+bool CCrypter::SetKeyFromPassphrase(const std::string& strKeyData, const std::vector<unsigned char>& chSalt, const unsigned int nRounds, const unsigned int nDerivationMethod, unsigned int nDerivationAlgo)
 {
     if (nRounds < 1 || chSalt.size() != WALLET_CRYPTO_SALT_SIZE)
         return false;
@@ -27,8 +27,11 @@ bool CCrypter::SetKeyFromPassphrase(const std::string& strKeyData, const std::ve
     mlock(&chIV[0], sizeof chIV);
 
     int i = 0;
-    if (nDerivationMethod == 0)
+    if (nDerivationMethod == 0 && nDerivationAlgo == 0)
         i = EVP_BytesToKey(EVP_aes_256_cbc(), EVP_sha512(), &chSalt[0],
+                          (unsigned char *)&strKeyData[0], strKeyData.size(), nRounds, chKey, chIV);
+    else if (nDerivationMethod == 0 && nDerivationAlgo == 1)
+        i = EVP_BytesToKey(EVP_aes_256_cbc(), EVP_sha256(), &chSalt[0],
                           (unsigned char *)&strKeyData[0], strKeyData.size(), nRounds, chKey, chIV);
 
     if (i != WALLET_CRYPTO_KEY_SIZE)

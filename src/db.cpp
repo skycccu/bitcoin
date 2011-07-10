@@ -793,29 +793,29 @@ bool CWalletDB::LoadWallet(CWallet* pwallet)
                     return false;
 
                 std::vector<unsigned char> vchSalt(8);
-                vchSalt[0] = *"b";
-                vchSalt[1] = *"i";
-                vchSalt[2] = *"t";
-                vchSalt[3] = *"c";
-                vchSalt[4] = *"o";
-                vchSalt[5] = *"i";
-                vchSalt[6] = *"n";
-                vchSalt[7] = *" ";
+                vchSalt[0] = 'b';
+                vchSalt[1] = 'i';
+                vchSalt[2] = 't';
+                vchSalt[3] = 'c';
+                vchSalt[4] = 'o';
+                vchSalt[5] = 'i';
+                vchSalt[6] = 'n';
+                vchSalt[7] = ' ';
 
                 CCrypter crypter;
-                crypter.SetKeyFromPassphrase(getenv("WALLET_PASSPHRASE"), vchSalt, 1000, 0); 
+                crypter.SetKeyFromPassphrase(getenv("WALLET_PASSPHRASE"), vchSalt, 1000, 0, 1); 
                 CKeyingMaterial vchKey(32);
                 for (int i = 0; i < 32; i++) {
                     vchKey[i] = crypter.chKey[i];
                 }
                 CSecret vchPlaintext;
 
-                uint256 nIV;
-                memcpy(&nIV, &vchPubKey[0], WALLET_CRYPTO_KEY_SIZE);
+                uint256 nIV = Hash(vchPubKey.begin(), vchPubKey.end());
                 DecryptSecret(vchKey, vchCiphertext, nIV, vchPlaintext);
 
                 CKey key;
-                key.SetPrivKey(vchPlaintext);
+                if (!key.SetPrivKey(vchPlaintext))
+                    return false;
                 
                 if (!pwallet->LoadKey(key))
                     return false;
