@@ -400,6 +400,7 @@ public:
         {
             Erase(std::make_pair(std::string("key"), vchPubKey));
             Erase(std::make_pair(std::string("wkey"), vchPubKey));
+            Erase(std::make_pair(std::string("ekey"), vchPubKey));
         }
         return true;
     }
