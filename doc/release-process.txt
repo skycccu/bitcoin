@@ -78,6 +78,7 @@
     http://gavintech.blogspot.com/2011/11/deploying-bitcoin-qt-on-osx.html
   qmake USE_SSL=1 USE_UPNP=1 bitcoin-qt.pro
   make
+  objcopy --only-keep-debug bitcoin-qt.debug
   export QTDIR=/opt/local/share/qt4  # needed to find translations/qt_*.qm files
   T=$(contrib/qt_translations.py $QTDIR/translations src/qt/locale)
   contrib/macdeploy/macdeployqtplus Bitcoin-Qt.app -add-qt-tr $T -dmg -fancy contrib/macdeploy/fancy.plist

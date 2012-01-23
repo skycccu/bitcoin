@@ -3,7 +3,7 @@ TARGET =
 VERSION = 0.6.0
 INCLUDEPATH += src src/json src/qt
 DEFINES += QT_GUI BOOST_THREAD_USE_LIB
-CONFIG += no_include_pwd
+CONFIG += no_include_pwd debug
 
 # for boost 1.37, add -mt to the boost libraries 
 # use: qmake BOOST_LIB_SUFFIX=-mt

@@ -66,7 +66,7 @@ ShowUninstDetails show
 Section -Main SEC0000
     SetOutPath $INSTDIR
     SetOverwrite on
-    File ../release/bitcoin-qt.exe
+    File ../debug/bitcoin-qt.exe
     File /oname=license.txt ../COPYING
     File /oname=readme.txt ../doc/README_windows.txt
     SetOutPath $INSTDIR\daemon
