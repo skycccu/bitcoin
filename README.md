@@ -28,6 +28,8 @@ The result should be a long list of fuzzed transaction ids, almost all of
 which are actually bad, invalid transactions. And a lot of
 "ConnectInputs failed" in testnet-box/2/testnet/debug.log
 
+See runfuzzer.py for an example fuzzing/stress-testing tool.
+
 
 THINGS TO BE AWARE OF
 ---------------------
