@@ -1,11 +1,6 @@
 //
 // Code for "fuzzing" transactions, to test implementations' network protocol handling
 //
-
-#include <boost/random/exponential_distribution.hpp>
-#include <boost/random/mersenne_twister.hpp>
-#include <boost/random/uniform_int.hpp>
-
 #include "util.h"
 #include "serialize.h"
 #include "main.h"
@@ -13,25 +8,25 @@
 #include "net.h"
 #include "fuzzer.h"
 
-using namespace boost::random;
-
-typedef boost::random::mt19937 RGen; // Mersenne twister pseudo-random-number generator type
+#include <openssl/rand.h>
+#include <boost/math/distributions/exponential.hpp>
 
 // Return integer from [0...n)
 static int
-R(RGen& rgen, int n)
+R(int n)
 {
-    uniform_int_distribution<> d(0,n-1);
-    return d(rgen);
+    unsigned int buf;
+    RAND_pseudo_bytes((unsigned char*) &buf, sizeof(int));
+    return buf % n;
 }
 
 // Return integer from [0..n),
 // but with values near 0 exponentially more likely
 static int
-RExp(RGen& rgen, int n)
+RExp(int n)
 {
-    exponential_distribution<> d(2.0);
-    double v = d(rgen) * n / 5.0;
+    boost::math::exponential_distribution<int> d(2.0);
+    double v = boost::math::quantile(d, R(INT_MAX)) * n / 5.0;
 
     if (v > n-1)
         return n-1;
@@ -40,22 +35,21 @@ RExp(RGen& rgen, int n)
 
 // Return n pseudo-random bytes
 static std::vector<unsigned char>
-Bytes(RGen& rgen, int n)
+Bytes(int n)
 {
     std::vector<unsigned char> result;
-    for (int i = 0; i < n; i++)
-        result.push_back(static_cast<unsigned char>(R(rgen, 0x100)));
+    RAND_pseudo_bytes(&result[0], n);
     return result;
 }
 
 // Return vector of n pretty-likely-to-be-valid Script opcodes:
 static std::vector<unsigned char>
-OpCodes(RGen& rgen, int n)
+OpCodes(int n)
 {
     std::vector<unsigned char> result;
     for (int i = 0; i < n; i++)
     {
-        result.push_back(static_cast<unsigned char>(R(rgen, OP_NOP10+1)));
+        result.push_back(static_cast<unsigned char>(R(OP_NOP10+1)));
     }
     return result;
 }
@@ -68,78 +62,75 @@ OpCodes(RGen& rgen, int n)
 // invalid.
 //
 void
-TweakScriptSig(RGen& rgen, CTransaction& tx)
+TweakScriptSig(CTransaction& tx)
 {
-    int whichTxIn = R(rgen, tx.vin.size());
+    int whichTxIn = R(tx.vin.size());
 
-    int nToInsert = RExp(rgen, 1000)+1;
+    int nToInsert = RExp(1000)+1;
     CScript& scriptSig = tx.vin[whichTxIn].scriptSig;
     std::vector<unsigned char> toInsert;
-    toInsert = OpCodes(rgen, nToInsert);
+    toInsert = OpCodes(nToInsert);
 
     scriptSig.insert(scriptSig.begin(), toInsert.begin(), toInsert.end());
 }
 
 // Change one bit in s:
 void
-ToggleBit(RGen& rgen, CDataStream& s)
+ToggleBit(CDataStream& s)
 {
-    int byte = R(rgen, s.size());
-    unsigned char mask = 1 << R(rgen, 8);
+    int byte = R(s.size());
+    unsigned char mask = 1 << R(8);
     s[byte] = s[byte]^mask;
 }
 
 // Change one byte in s:
 void
-ChangeByte(RGen& rgen, CDataStream& s)
+ChangeByte(CDataStream& s)
 {
-    int byte = R(rgen, s.size());
-    unsigned char bits = 1+R(rgen, 255); // 1-255
+    int byte = R(s.size());
+    unsigned char bits = 1+R(255); // 1-255
     s[byte] = s[byte]^bits;
 }
 
 // Insert n random bytes into s, at a random location:
 void
-InsertBytes(RGen& rgen, CDataStream& s, int n)
+InsertBytes(CDataStream& s, int n)
 {
-    CDataStream s2(Bytes(rgen, n));
-    int where = R(rgen, s.size());
+    CDataStream s2(Bytes(n));
+    int where = R(s.size());
     s.insert(s.begin()+where, s2.begin(), s2.end());
 }
 
 // Erase n random bytes, at a random location:
 void
-EraseBytes(RGen& rgen, CDataStream& s, int n)
+EraseBytes(CDataStream& s, int n)
 {
     if (n > s.size()) n = s.size();
-    int where = R(rgen, s.size()-n);
+    int where = R(s.size()-n);
     s.erase(s.begin()+where, s.begin()+where+n);
 }
 
 void
 FuzzTransaction(const CTransaction& tx, const uint64_t& fuzzSeed, CDataStream& fuzzedDataRet)
 {
-    RGen rgen;
-    rgen.seed(fuzzSeed);
-    
     CTransaction tweaked = tx;
-    TweakScriptSig(rgen, tweaked);
+    TweakScriptSig(tweaked);
 
     // Mess with another input 10% of the time:
-    if (R(rgen, 10) == 0)
-        TweakScriptSig(rgen, tweaked);
+    if (R(10) == 0)
+        TweakScriptSig(tweaked);
 
     fuzzedDataRet << tweaked;
 
     // 10% chance of each of these:
-    if (R(rgen, 10) == 0)
-        ToggleBit(rgen, fuzzedDataRet);
-    if (R(rgen, 10) == 0)
-        ChangeByte(rgen, fuzzedDataRet);
-    if (R(rgen, 10) == 0)
-        InsertBytes(rgen, fuzzedDataRet, RExp(rgen, 500));
-    if (R(rgen, 10) == 0)
-        EraseBytes(rgen, fuzzedDataRet, R(rgen, fuzzedDataRet.size()));
+    if (R(10) == 0)
+        ToggleBit(fuzzedDataRet);
+    if (R(10) == 0)
+        ChangeByte(fuzzedDataRet);
+    if (R(10) == 0)
+        InsertBytes(fuzzedDataRet, RExp(500));
+    if (R(10) == 0)
+        EraseBytes(fuzzedDataRet, R(fuzzedDataRet.size()));
 }
 
 void
