@@ -8,16 +8,25 @@
 #include "net.h"
 #include "fuzzer.h"
 
-#include <openssl/rand.h>
+#include <stdlib.h>
 #include <boost/math/distributions/exponential.hpp>
 
 // Return integer from [0...n)
 static int
 R(int n)
 {
-    unsigned int buf;
-    RAND_pseudo_bytes((unsigned char*) &buf, sizeof(int));
-    return buf % n;
+    unsigned int random = rand();
+    unsigned int max_custom_rand = RAND_MAX;
+    while (random > max_custom_rand - ((max_custom_rand+1) % n))
+    {
+        // make sure random values are equally probablistic across all possible return values
+        while (n > max_custom_rand+1)
+        {
+            random = random * RAND_MAX + rand();
+            max_custom_rand = max_custom_rand * RAND_MAX + RAND_MAX;
+        }
+    }
+    return random % n;
 }
 
 // Return integer from [0..n),
@@ -38,7 +47,8 @@ static std::vector<unsigned char>
 Bytes(int n)
 {
     std::vector<unsigned char> result;
-    RAND_pseudo_bytes(&result[0], n);
+    for (int i = 0; i < n; i++)
+        result[i] = R(256);
     return result;
 }
 
@@ -111,8 +121,10 @@ EraseBytes(CDataStream& s, int n)
 }
 
 void
-FuzzTransaction(const CTransaction& tx, const uint64_t& fuzzSeed, CDataStream& fuzzedDataRet)
+FuzzTransaction(const CTransaction& tx, const unsigned int& fuzzSeed, CDataStream& fuzzedDataRet)
 {
+    srand(fuzzSeed);
+
     CTransaction tweaked = tx;
     TweakScriptSig(tweaked);
 
