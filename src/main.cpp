@@ -1348,6 +1348,9 @@ bool CBlockStore::ConnectBlock(CBlock& block, CTxDB& txdb, CBlockIndex* pindex)
     unsigned int nTxes = block.vtx.size();
     if (block.vMerkleTree.size() < nTxes)
         block.BuildMerkleTree();
+    bool fMultithread = nBestHeight >= Checkpoints::GetTotalBlocksEstimate();
+    vector<MapPrevTx*> vmapInputs(nTxes);
+    bool fValid = true;
     for (unsigned int i = 0; i < nTxes; i++)
     {
         uint256& hashTx = block.vMerkleTree[i];
@@ -1360,42 +1363,88 @@ bool CBlockStore::ConnectBlock(CBlock& block, CTxDB& txdb, CBlockIndex* pindex)
             {
                 BOOST_FOREACH(CDiskTxPos &pos, txindexOld.vSpent)
                     if (pos.IsNull())
-                        return false;
+                    {
+                        fValid = false;
+                        break;
+                    }
+                if (!fValid)
+                    break;
             }
         }
 
         nSigOps += tx.GetLegacySigOpCount();
         if (nSigOps > MAX_BLOCK_SIGOPS)
-            return block.DoS(100, error("ConnectBlock() : too many sigops"));
+        {
+            block.DoS(100, error("ConnectBlock() : too many sigops"));
+            fValid = false;
+            break;
+        }
 
         CDiskTxPos posThisTx(pindex->nFile, pindex->nBlockPos, nTxPos);
         nTxPos += GetSerializeSize(tx, SER_DISK, CLIENT_VERSION);
 
-        MapPrevTx mapInputs;
         if (!tx.IsCoinBase())
         {
+            MapPrevTx* pmapInputs = vmapInputs[i] = new MapPrevTx();
+
             bool fInvalid;
-            if (!tx.FetchInputs(txdb, mapQueuedChanges, true, false, mapInputs, fInvalid))
-                return false;
+            if (fMultithread) ENTER_CRITICAL_SECTION(cs_mapQueuedChanges);
+            if (!tx.FetchInputs(txdb, mapQueuedChanges, true, false, *pmapInputs, fInvalid))
+            {
+                fValid = false;
+                if (fMultithread) LEAVE_CRITICAL_SECTION(cs_mapQueuedChanges);
+                delete pmapInputs;
+                break;
+            }
 
             if (fStrictPayToScriptHash)
             {
                 // Add in sigops done by pay-to-script-hash inputs;
                 // this is to prevent a "rogue miner" from creating
                 // an incredibly-expensive-to-validate block.
-                nSigOps += tx.GetP2SHSigOpCount(mapInputs);
+                nSigOps += tx.GetP2SHSigOpCount(*pmapInputs);
                 if (nSigOps > MAX_BLOCK_SIGOPS)
-                    return block.DoS(100, error("ConnectBlock() : too many sigops"));
+                {
+                    block.DoS(100, error("ConnectBlock() : too many sigops"));
+                    fValid = false;
+                    if (fMultithread) LEAVE_CRITICAL_SECTION(cs_mapQueuedChanges);
+                    delete pmapInputs;
+                    break;
+                }
             }
 
-            nFees += tx.GetValueIn(mapInputs)-tx.GetValueOut();
+            nFees += tx.GetValueIn(*pmapInputs)-tx.GetValueOut();
 
-            if (!tx.ConnectInputs(mapInputs, mapQueuedChanges, &cs_mapQueuedChanges, posThisTx, pindex, true, false, fStrictPayToScriptHash))
-                return false;
+            if (fMultithread) LEAVE_CRITICAL_SECTION(cs_mapQueuedChanges);
+
+            if (!fMultithread)
+            {
+                if (!tx.ConnectInputs(*pmapInputs, mapQueuedChanges, NULL, posThisTx, pindex, true, false, fStrictPayToScriptHash))
+                {
+                    fValid = false;
+                    delete pmapInputs;
+                    break;
+                }
+                delete pmapInputs;
+            }
+            else
+            {
+                boost::function <bool()> func = boost::bind(&CTransaction::ConnectInputs, &tx, boost::ref(*pmapInputs), boost::ref(mapQueuedChanges), &cs_mapQueuedChanges, boost::ref(posThisTx), pindex, true, false, fStrictPayToScriptHash);
+                if (!func())
+                    fValid = false;
+                delete pmapInputs;
+            }
         }
 
+        if (fMultithread) ENTER_CRITICAL_SECTION(cs_mapQueuedChanges);
         mapQueuedChanges[hashTx] = CTxIndex(posThisTx, tx.vout.size());
+        if (fMultithread) LEAVE_CRITICAL_SECTION(cs_mapQueuedChanges);
     }
+
+    // Make sure all threads are finished
+
+    if (!fValid)
+        return false;
 
     // Write queued txindex changes
     for (map<uint256, CTxIndex>::iterator mi = mapQueuedChanges.begin(); mi != mapQueuedChanges.end(); ++mi)
