@@ -570,7 +570,7 @@ bool CTxMemPool::accept(CTxDB& txdb, CTransaction &tx, bool fCheckInputs,
 
         // Check against previous transactions
         // This is done last to help prevent CPU exhaustion denial-of-service attacks.
-        if (!tx.ConnectInputs(mapInputs, mapUnused, CDiskTxPos(1,1,1), pindexBest, false, false))
+        if (!tx.ConnectInputs(mapInputs, mapUnused, NULL, CDiskTxPos(1,1,1), pindexBest, false, false))
         {
             return error("CTxMemPool::accept() : ConnectInputs failed %s", hash.ToString().substr(0,10).c_str());
         }
@@ -1142,7 +1142,7 @@ unsigned int CTransaction::GetP2SHSigOpCount(const MapPrevTx& inputs) const
 }
 
 bool CTransaction::ConnectInputs(MapPrevTx inputs,
-                                 map<uint256, CTxIndex>& mapTestPool, const CDiskTxPos& posThisTx,
+                                 map<uint256, CTxIndex>& mapTestPool, CCriticalSection* pcs, const CDiskTxPos& posThisTx,
                                  const CBlockIndex* pindexBlock, bool fBlock, bool fMiner, bool fStrictPayToScriptHash)
 {
     // Take over previous transactions' spent pointers
@@ -1188,8 +1188,13 @@ bool CTransaction::ConnectInputs(MapPrevTx inputs,
             // Check for conflicts (double-spend)
             // This doesn't trigger the DoS code on purpose; if it did, it would make it easier
             // for an attacker to attempt to split the network.
+            if (pcs) ENTER_CRITICAL_SECTION((*pcs));
             if (!txindex.vSpent[prevout.n].IsNull())
+            {
+                if (pcs) LEAVE_CRITICAL_SECTION((*pcs));
                 return fMiner ? false : error("ConnectInputs() : %s prev tx already used at %s", GetHash().ToString().substr(0,10).c_str(), txindex.vSpent[prevout.n].ToString().c_str());
+            }
+            if (pcs) LEAVE_CRITICAL_SECTION((*pcs));
 
             // Skip ECDSA signature verification when connecting blocks (fBlock=true)
             // before the last blockchain checkpoint. This is safe because block merkle hashes are
@@ -1208,6 +1213,16 @@ bool CTransaction::ConnectInputs(MapPrevTx inputs,
                 }
             }
 
+            // Check for conflicts (again)
+            // Do this a first time before we VerifySignature to make it a tiny
+            // bit harder to DoS a node by making them check signatures constantly
+            if (pcs) ENTER_CRITICAL_SECTION((*pcs));
+            if (!txindex.vSpent[prevout.n].IsNull())
+            {
+                if (pcs) LEAVE_CRITICAL_SECTION((*pcs));
+                return fMiner ? false : error("ConnectInputs() : %s prev tx already used at %s", GetHash().ToString().substr(0,10).c_str(), txindex.vSpent[prevout.n].ToString().c_str());
+            }
+
             // Mark outpoints as spent
             txindex.vSpent[prevout.n] = posThisTx;
 
@@ -1216,6 +1231,8 @@ bool CTransaction::ConnectInputs(MapPrevTx inputs,
             {
                 mapTestPool[prevout.hash] = txindex;
             }
+
+            if (pcs) LEAVE_CRITICAL_SECTION((*pcs));
         }
 
         if (nValueIn < GetValueOut())
@@ -1325,6 +1342,7 @@ bool CBlockStore::ConnectBlock(CBlock& block, CTxDB& txdb, CBlockIndex* pindex)
     unsigned int nTxPos = pindex->nBlockPos + GetSerializeSize(CBlock(), SER_DISK, CLIENT_VERSION) - 1 + GetSizeOfCompactSize(block.vtx.size());
 
     map<uint256, CTxIndex> mapQueuedChanges;
+    CCriticalSection cs_mapQueuedChanges;
     int64 nFees = 0;
     unsigned int nSigOps = 0;
     unsigned int nTxes = block.vtx.size();
@@ -1372,7 +1390,7 @@ bool CBlockStore::ConnectBlock(CBlock& block, CTxDB& txdb, CBlockIndex* pindex)
 
             nFees += tx.GetValueIn(mapInputs)-tx.GetValueOut();
 
-            if (!tx.ConnectInputs(mapInputs, mapQueuedChanges, posThisTx, pindex, true, false, fStrictPayToScriptHash))
+            if (!tx.ConnectInputs(mapInputs, mapQueuedChanges, &cs_mapQueuedChanges, posThisTx, pindex, true, false, fStrictPayToScriptHash))
                 return false;
         }
 
@@ -3589,7 +3607,7 @@ CBlock* CreateNewBlock(CReserveKey& reservekey)
             if (nBlockSigOps + nTxSigOps >= MAX_BLOCK_SIGOPS)
                 continue;
 
-            if (!tx.ConnectInputs(mapInputs, mapTestPoolTmp, CDiskTxPos(1,1,1), pindexPrev, false, true))
+            if (!tx.ConnectInputs(mapInputs, mapTestPoolTmp, NULL, CDiskTxPos(1,1,1), pindexPrev, false, true))
                 continue;
             mapTestPoolTmp[tx.GetHash()] = CTxIndex(CDiskTxPos(1,1,1), tx.vout.size());
             swap(mapTestPool, mapTestPoolTmp);

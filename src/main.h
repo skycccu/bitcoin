@@ -668,6 +668,7 @@ public:
 
         @param[in] inputs	Previous transactions (from FetchInputs)
         @param[out] mapTestPool	Keeps track of inputs that need to be updated on disk
+        @param[in] pcs		critical section to lock before touching mapTestPool/inputs[*].vSpent[*]
         @param[in] posThisTx	Position of this transaction on disk
         @param[in] pindexBlock
         @param[in] fBlock	true if called from ConnectBlock
@@ -676,7 +677,7 @@ public:
         @return Returns true if all checks succeed
      */
     bool ConnectInputs(MapPrevTx inputs,
-                       std::map<uint256, CTxIndex>& mapTestPool, const CDiskTxPos& posThisTx,
+                       std::map<uint256, CTxIndex>& mapTestPool, CCriticalSection* pcs, const CDiskTxPos& posThisTx,
                        const CBlockIndex* pindexBlock, bool fBlock, bool fMiner, bool fStrictPayToScriptHash=true);
     bool ClientConnectInputs();
     bool CheckTransaction() const;
