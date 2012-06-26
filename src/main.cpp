@@ -1430,9 +1430,9 @@ bool CBlockStore::ConnectBlock(CBlock& block, CTxDB& txdb, CBlockIndex* pindex)
             else
             {
                 boost::function <bool()> func = boost::bind(&CTransaction::ConnectInputs, &tx, boost::ref(*pmapInputs), boost::ref(mapQueuedChanges), &cs_mapQueuedChanges, boost::ref(posThisTx), pindex, true, false, fStrictPayToScriptHash);
-                if (!func())
-                    fValid = false;
-                delete pmapInputs;
+                LOCK(cs_queueSetValidCalls);
+                queueSetValidCalls.push(make_tuple(new boost::function<bool()>(func), &fValid, pmapInputs));
+                sem_SetValidCalls.post();
             }
         }
 
@@ -1441,7 +1441,46 @@ bool CBlockStore::ConnectBlock(CBlock& block, CTxDB& txdb, CBlockIndex* pindex)
         if (fMultithread) LEAVE_CRITICAL_SECTION(cs_mapQueuedChanges);
     }
 
-    // Make sure all threads are finished
+    if (fMultithread)
+    {
+        while (fValid && sem_SetValidCalls.try_wait())
+        {
+            if (!fProcessCallbacks)
+                break;
+            boost::tuple<boost::function <bool()>*, bool*, MapPrevTx*> callback;
+            {
+                LOCK(cs_queueSetValidCalls);
+                assert(queueSetValidCalls.size() > 0);
+                callback = queueSetValidCalls.front();
+                queueSetValidCalls.pop();
+            }
+            if (!(*(boost::tuples::get<0>(callback)))())
+                fValid = false;
+            delete boost::tuples::get<0>(callback);
+            delete boost::tuples::get<2>(callback);
+
+            sem_SetValidCallsDone.post();
+        }
+        if (!fProcessCallbacks)
+            return false;
+        // If we aren't valid, try to skip as many of the queueSetValidCalls'
+        // as possible without calling ConnectInputs.
+        if (!fValid)
+        {
+            LOCK(cs_queueSetValidCalls);
+            while (sem_SetValidCalls.try_wait())
+            {
+                assert(queueSetValidCalls.size() > 0);
+                delete boost::tuples::get<0>(queueSetValidCalls.front());
+                delete boost::tuples::get<2>(queueSetValidCalls.front());
+                queueSetValidCalls.pop();
+                sem_SetValidCallsDone.post();
+            }
+        }
+
+        for (unsigned int i = 1; i < nTxes; i++)
+            sem_SetValidCallsDone.wait();
+    }
 
     if (!fValid)
         return false;

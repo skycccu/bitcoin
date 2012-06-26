@@ -42,8 +42,10 @@ void CBlockStore::StopProcessCallbacks()
         LOCK(cs_callbacks);
         fProcessCallbacks = false;
         sem_callbacks.post();
+        for (int i = 0; i < nProcessingCallbacks; i++)
+            sem_SetValidCalls.post();
     }
-    while (fProcessingCallbacks)
+    while (nProcessingCallbacks > 0)
         Sleep(20);
 }
 
@@ -53,7 +55,7 @@ void CBlockStore::ProcessCallbacks()
         LOCK(cs_callbacks);
         if (!fProcessCallbacks)
             return;
-        fProcessingCallbacks = true;
+        nProcessingCallbacks++;
     }
 
     loop
@@ -69,7 +71,8 @@ void CBlockStore::ProcessCallbacks()
         }
         else
         {
-            fProcessingCallbacks = false;
+            LOCK(cs_callbacks);
+            nProcessingCallbacks--;
             return;
         }
 
@@ -84,8 +87,51 @@ void CBlockStoreProcessCallbacks(void* parg)
     ((CBlockStore*)parg)->ProcessCallbacks();
 }
 
-CBlockStore::CBlockStore() : sem_callbacks(0), fProcessCallbacks(true), fProcessingCallbacks(false)
+void CBlockStore::ProcessSetValidCallbacks()
+{
+    {
+        LOCK(cs_callbacks);
+        if (!fProcessCallbacks)
+            return;
+        nProcessingCallbacks++;
+    }
+
+    loop
+    {
+        boost::tuple<boost::function <bool()>*, bool*, MapPrevTx*> callback;
+        sem_SetValidCalls.wait();
+        if (fProcessCallbacks)
+        {
+            LOCK(cs_queueSetValidCalls);
+            assert(queueSetValidCalls.size() > 0);
+            callback = queueSetValidCalls.front();
+            queueSetValidCalls.pop();
+        }
+        else
+        {
+            LOCK(cs_callbacks);
+            nProcessingCallbacks--;
+            return;
+        }
+        if (!(*(boost::tuples::get<0>(callback)))())
+            *(boost::tuples::get<1>(callback)) = false;
+        delete boost::tuples::get<0>(callback);
+        delete boost::tuples::get<2>(callback);
+
+        sem_SetValidCallsDone.post();
+    }
+}
+
+void CBlockStoreProcessSetValidCallbacks(void* parg)
+{
+    ((CBlockStore*)parg)->ProcessSetValidCallbacks();
+}
+
+CBlockStore::CBlockStore() : sem_callbacks(0), fProcessCallbacks(true), nProcessingCallbacks(0), sem_SetValidCalls(0), sem_SetValidCallsDone(0)
 {
     if (!CreateThread(CBlockStoreProcessCallbacks, this))
         throw std::runtime_error("Couldn't create callback threads");
+    for (int i = 0; i < GetArg("-sigverifyconcurrency", boost::thread::hardware_concurrency()); i++)
+        if (!CreateThread(CBlockStoreProcessSetValidCallbacks, this))
+            throw std::runtime_error("Couldn't create callback threads");
 }

@@ -7,6 +7,7 @@
 // depend on it for anything.
 
 #include <boost/signals2/signal.hpp>
+#include <boost/tuple/tuple.hpp>
 #include <queue>
 #include <set>
 
@@ -18,6 +19,10 @@ class CTxDB;
 class CBlockIndex;
 class CHub;
 class CNode;
+
+class CTxIndex;
+class CTransaction;
+typedef std::map<uint256, std::pair<CTxIndex, CTransaction> > MapPrevTx;
 
 class CBlockStoreSignalTable
 {
@@ -52,7 +57,12 @@ private:
     CCriticalSection cs_callbacks;
     CSemaphore sem_callbacks;
     bool fProcessCallbacks;
-    bool fProcessingCallbacks;
+    int nProcessingCallbacks;
+
+    CCriticalSection cs_queueSetValidCalls;
+    CSemaphore sem_SetValidCalls;
+    CSemaphore sem_SetValidCallsDone;
+    std::queue<boost::tuple<boost::function <bool()>*, bool*, MapPrevTx*> > queueSetValidCalls;
 
     std::queue<std::pair<CBlock*, CNode*> > queueFinishEmitBlockCallbacks;
     void SubmitCallbackFinishEmitBlock(CBlock& block, CNode* pNodeDoS);
@@ -68,6 +78,7 @@ private:
 public:
     // Loops to process callbacks (do not call manually, automatically started in the constructor)
         void ProcessCallbacks();
+        void ProcessSetValidCallbacks();
     // Stop callback processing threads
     void StopProcessCallbacks();
 
