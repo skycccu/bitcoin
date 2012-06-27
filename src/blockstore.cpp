@@ -22,6 +22,7 @@ void CBlockStore::SubmitCallbackFinishEmitBlock(CBlock& block, CNode* pNodeDoS)
         LOCK(cs_callbacks);
         nQueueSize = queueFinishEmitBlockCallbacks.size();
     }
+fprintf(stderr, "%u\n", nQueueSize);
     while (nQueueSize >= GetArg("-blockbuffersize", 20) && fProcessCallbacks)
     {
         Sleep(20);
