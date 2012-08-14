@@ -890,6 +890,18 @@ public:
 
     void UpdateTime(const CBlockIndex* pindexPrev);
 
+    CBlock GetBlockHeader() const
+    {
+        CBlock block;
+        block.nVersion       = nVersion;
+        block.hashPrevBlock  = hashPrevBlock;
+        block.hashMerkleRoot = hashMerkleRoot;
+        block.nTime          = nTime;
+        block.nBits          = nBits;
+        block.nNonce         = nNonce;
+        return block;
+    }
+
 
     uint256 BuildMerkleTree() const
     {
