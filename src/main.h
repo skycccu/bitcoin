@@ -1648,4 +1648,36 @@ public:
 
 extern CTxMemPool mempool;
 
+
+
+
+
+
+
+/** Used to relay blocks as header + coinbase tx + vector<tx hash>
+ * and to store such blocks until we have all of their transactions.
+ * This saves some bandwidth in relaying blocks, as most nodes already
+ * have a memory pool which will contain most of the transactions in
+ * new blocks.
+ */
+class CRelayBlock
+{
+private:
+    CBlock header;
+    CTransaction txCoinbase;
+    std::vector<uint256> vtx;
+
+public:
+    // Create from a CBlock
+    CRelayBlock(const CBlock& block);
+
+    IMPLEMENT_SERIALIZE
+    (
+        // Force header into SER_BLOCKHEADERONLY
+        nSerSize += ::SerReadWrite(s, header, nType|SER_BLOCKHEADERONLY, nVersion, ser_action);
+        READWRITE(txCoinbase);
+        READWRITE(vtx);
+    )
+};
+
 #endif

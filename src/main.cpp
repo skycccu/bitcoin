@@ -1971,6 +1971,23 @@ bool ProcessBlock(CNode* pfrom, CBlock* pblock)
 
 
 
+CRelayBlock::CRelayBlock(const CBlock& block)
+{
+    header = block.GetBlockHeader();
+    assert(!block.vtx.empty());
+    txCoinbase = block.vtx[0];
+    vtx.reserve(block.vtx.size() - 1);
+    for(unsigned int i = 1; i < block.vtx.size(); i++)
+        vtx.push_back(block.vtx[i].GetHash());
+}
+
+
+
+
+
+
+
+
 bool CheckDiskSpace(uint64 nAdditionalBytes)
 {
     uint64 nFreeBytesAvailable = filesystem::space(GetDataDir()).available;
