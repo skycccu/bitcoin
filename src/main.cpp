@@ -662,13 +662,13 @@ CTxMemPool::clear()
     ++nTransactionsUpdated;
 }
 
-void CTxMemPool::queryHashes(std::vector<uint256>& vtxid)
+void CTxMemPool::queryHashes(std::vector<uint256>& vtxid) const
 {
     vtxid.clear();
 
     LOCK(cs);
     vtxid.reserve(mapTx.size());
-    for (map<uint256, CTransaction>::iterator mi = mapTx.begin(); mi != mapTx.end(); ++mi)
+    for (map<uint256, CTransaction>::const_iterator mi = mapTx.begin(); mi != mapTx.end(); ++mi)
         vtxid.push_back((*mi).first);
 }
 
@@ -1289,7 +1289,7 @@ bool CTransaction::ClientConnectInputs()
             COutPoint prevout = vin[i].prevout;
             if (!mempool.exists(prevout.hash))
                 return false;
-            CTransaction& txPrev = mempool.lookup(prevout.hash);
+            const CTransaction& txPrev = mempool.lookup(prevout.hash);
 
             if (prevout.n >= txPrev.vout.size())
                 return false;

@@ -1627,22 +1627,24 @@ public:
     bool addUnchecked(const uint256& hash, CTransaction &tx);
     bool remove(CTransaction &tx);
     void clear();
-    void queryHashes(std::vector<uint256>& vtxid);
+    void queryHashes(std::vector<uint256>& vtxid) const;
 
-    unsigned long size()
+    unsigned long size() const
     {
         LOCK(cs);
         return mapTx.size();
     }
 
-    bool exists(uint256 hash)
+    bool exists(uint256 hash) const
     {
         return (mapTx.count(hash) != 0);
     }
 
-    CTransaction& lookup(uint256 hash)
+    const CTransaction& lookup(uint256 hash) const
     {
-        return mapTx[hash];
+        assert(exists(hash));
+        std::map<uint256, CTransaction>::const_iterator it = mapTx.find(hash);
+        return it->second;
     }
 };
 
