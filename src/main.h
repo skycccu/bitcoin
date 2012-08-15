@@ -1669,7 +1669,16 @@ private:
     CTransaction txCoinbase;
     std::vector<uint256> vtx;
 
+    std::vector<CTransaction> vtxCache;
+    std::map<uint256, unsigned int> mapmissingTxes;
+
+    // Sets up mapmissingTxes
+    void PostDeserialize();
+
 public:
+    // Only for deserialization
+    CRelayBlock() {}
+
     // Create from a CBlock
     CRelayBlock(const CBlock& block);
 
@@ -1679,7 +1688,21 @@ public:
         nSerSize += ::SerReadWrite(s, header, nType|SER_BLOCKHEADERONLY, nVersion, ser_action);
         READWRITE(txCoinbase);
         READWRITE(vtx);
+        if (fRead)
+            const_cast<CRelayBlock*>(this)->PostDeserialize();
     )
+
+    void GetMissingTransactions(std::set<uint256>& setMissingTxes);
+
+    void ProvideTransaction(const CTransaction& tx);
+
+    // Returns true if all missing transactions were in the pool
+    bool FillFromMemPool(const CTxMemPool& pool);
+
+    // Returns false if transactions were still missing
+    bool GetBlock(CBlock& blockRet);
+
+    uint256 GetBlockHash();
 };
 
 #endif

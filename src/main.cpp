@@ -1967,11 +1967,95 @@ bool ProcessBlock(CNode* pfrom, CBlock* pblock)
 CRelayBlock::CRelayBlock(const CBlock& block)
 {
     header = block.GetBlockHeader();
+
     assert(!block.vtx.empty());
     txCoinbase = block.vtx[0];
+
+    // We don't bother filling in vtxCache as this is almost
+    // certainly just going to be used to relay the block.
     vtx.reserve(block.vtx.size() - 1);
+    vtxCache.resize(block.vtx.size() - 1);
     for(unsigned int i = 1; i < block.vtx.size(); i++)
-        vtx.push_back(block.vtx[i].GetHash());
+    {
+        uint256 hash = block.vtx[i].GetHash();
+        vtx.push_back(hash);
+        mapmissingTxes[hash] = i - 1;
+    }
+}
+
+void CRelayBlock::PostDeserialize()
+{
+    for(unsigned int i = 0; i < vtx.size(); i++)
+        mapmissingTxes[vtx[i]] = i;
+    vtxCache.resize(vtx.size());
+}
+
+void CRelayBlock::GetMissingTransactions(std::set<uint256>& setMissingTxes)
+{
+    setMissingTxes.clear();
+    BOOST_FOREACH(const PAIRTYPE(uint256, unsigned int)& pair, mapmissingTxes)
+        setMissingTxes.insert(pair.first);
+}
+
+void CRelayBlock::ProvideTransaction(const CTransaction& tx)
+{
+    uint256 hash = tx.GetHash();
+    map<uint256, unsigned int>::iterator it = mapmissingTxes.find(hash);
+    if (it != mapmissingTxes.end())
+    {
+        vtxCache[it->second] = tx;
+        mapmissingTxes.erase(it);
+    }
+}
+
+bool CRelayBlock::FillFromMemPool(const CTxMemPool& pool)
+{
+    pair<bool, map<uint256, unsigned int>::iterator> itDel = make_pair(false, map<uint256, unsigned int>::iterator());
+    bool fFoundAll = true;
+    for (map<uint256, unsigned int>::iterator it = mapmissingTxes.begin(); it != mapmissingTxes.end(); it++)
+    {
+        if (itDel.first)
+        {
+            mapmissingTxes.erase(itDel.second);
+            itDel.first = false;
+        }
+        if (pool.exists(it->first))
+        {
+            vtxCache[it->second] = pool.lookup(it->first);
+            itDel = make_pair(true, it);
+        }
+        else
+            fFoundAll = false;
+    }
+    if (itDel.first)
+        mapmissingTxes.erase(itDel.second);
+    return fFoundAll;
+}
+
+bool CRelayBlock::GetBlock(CBlock& blockRet)
+{
+    if (!mapmissingTxes.empty())
+        return false;
+
+    blockRet.nVersion       = header.nVersion;
+    blockRet.hashPrevBlock  = header.hashPrevBlock;
+    blockRet.hashMerkleRoot = header.hashMerkleRoot;
+    blockRet.nTime          = header.nTime;
+    blockRet.nBits          = header.nBits;
+    blockRet.nNonce         = header.nNonce;
+
+    blockRet.vtx.clear();
+    blockRet.vtx.reserve(vtx.size() + 1);
+    blockRet.vtx.push_back(txCoinbase);
+    BOOST_FOREACH(CTransaction& tx, vtxCache)
+        blockRet.vtx.push_back(tx);
+
+    return true;
+}
+
+uint256 CRelayBlock::GetBlockHash()
+{
+    return header.GetHash();
 }
 
 
