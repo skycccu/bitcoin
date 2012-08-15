@@ -24,6 +24,8 @@ set<CWallet*> setpwalletRegistered;
 
 CCriticalSection cs_main;
 
+CPendingRelayBlockPool mempoolBlocks;
+
 CTxMemPool mempool;
 unsigned int nTransactionsUpdated = 0;
 
@@ -2887,6 +2889,7 @@ bool static ProcessMessage(CNode* pfrom, string strCommand, CDataStream& vRecv)
             }
             else if (inv.IsKnownType())
             {
+// TODO: relay txes in recent blocks (doesn't jgarzik have a patch for that?)
                 // Send stream from relay memory
                 bool pushed = false;
                 {
@@ -2994,63 +2997,70 @@ bool static ProcessMessage(CNode* pfrom, string strCommand, CDataStream& vRecv)
         CTransaction tx;
         vRecv >> tx;
 
-        CInv inv(MSG_TX, tx.GetHash());
+        uint256 hash = tx.GetHash();
+
+        CInv inv(MSG_TX, hash);
         pfrom->AddInventoryKnown(inv);
 
-        bool fMissingInputs = false;
-        if (tx.AcceptToMemoryPool(txdb, true, &fMissingInputs))
+        if(mempoolBlocks.ProvideTransaction(tx, hash))
+            mempoolBlocks.ProcessBlocks();
+        else
         {
-            SyncWithWallets(tx, NULL, true);
-            RelayTransaction(tx, vMsg);
-            mapAlreadyAskedFor.erase(inv);
-            vWorkQueue.push_back(inv.hash);
-            vEraseQueue.push_back(inv.hash);
-
-            // Recursively process any orphan transactions that depended on this one
-            for (unsigned int i = 0; i < vWorkQueue.size(); i++)
+            bool fMissingInputs = false;
+            if (tx.AcceptToMemoryPool(txdb, true, &fMissingInputs))
             {
-                uint256 hashPrev = vWorkQueue[i];
-                for (map<uint256, CDataStream*>::iterator mi = mapOrphanTransactionsByPrev[hashPrev].begin();
-                     mi != mapOrphanTransactionsByPrev[hashPrev].end();
-                     ++mi)
-                {
-                    const CDataStream& vMsg = *((*mi).second);
-                    CTransaction tx;
-                    CDataStream(vMsg) >> tx;
-                    CInv inv(MSG_TX, tx.GetHash());
-                    bool fMissingInputs2 = false;
+                SyncWithWallets(tx, NULL, true);
+                RelayTransaction(tx, vMsg);
+                mapAlreadyAskedFor.erase(inv);
+                vWorkQueue.push_back(inv.hash);
+                vEraseQueue.push_back(inv.hash);
 
-                    if (tx.AcceptToMemoryPool(txdb, true, &fMissingInputs2))
+                // Recursively process any orphan transactions that depended on this one
+                for (unsigned int i = 0; i < vWorkQueue.size(); i++)
+                {
+                    uint256 hashPrev = vWorkQueue[i];
+                    for (map<uint256, CDataStream*>::iterator mi = mapOrphanTransactionsByPrev[hashPrev].begin();
+                         mi != mapOrphanTransactionsByPrev[hashPrev].end();
+                         ++mi)
                     {
-                        printf("   accepted orphan tx %s\n", inv.hash.ToString().substr(0,10).c_str());
-                        SyncWithWallets(tx, NULL, true);
-                        RelayTransaction(tx, vMsg);
-                        mapAlreadyAskedFor.erase(inv);
-                        vWorkQueue.push_back(inv.hash);
-                        vEraseQueue.push_back(inv.hash);
-                    }
-                    else if (!fMissingInputs2)
-                    {
-                        // invalid orphan
-                        vEraseQueue.push_back(inv.hash);
-                        printf("   removed invalid orphan tx %s\n", inv.hash.ToString().substr(0,10).c_str());
+                        const CDataStream& vMsg = *((*mi).second);
+                        CTransaction tx;
+                        CDataStream(vMsg) >> tx;
+                        CInv inv(MSG_TX, tx.GetHash());
+                        bool fMissingInputs2 = false;
+
+                        if (tx.AcceptToMemoryPool(txdb, true, &fMissingInputs2))
+                        {
+                            printf("   accepted orphan tx %s\n", inv.hash.ToString().substr(0,10).c_str());
+                            SyncWithWallets(tx, NULL, true);
+                            RelayTransaction(tx, vMsg);
+                            mapAlreadyAskedFor.erase(inv);
+                            vWorkQueue.push_back(inv.hash);
+                            vEraseQueue.push_back(inv.hash);
+                        }
+                        else if (!fMissingInputs2)
+                        {
+                            // invalid orphan
+                            vEraseQueue.push_back(inv.hash);
+                            printf("   removed invalid orphan tx %s\n", inv.hash.ToString().substr(0,10).c_str());
+                        }
                     }
                 }
+
+                BOOST_FOREACH(uint256 hash, vEraseQueue)
+                    EraseOrphanTx(hash);
             }
+            else if (fMissingInputs)
+            {
+                AddOrphanTx(vMsg);
 
-            BOOST_FOREACH(uint256 hash, vEraseQueue)
-                EraseOrphanTx(hash);
+                // DoS prevention: do not allow mapOrphanTransactions to grow unbounded
+                unsigned int nEvicted = LimitOrphanTxSize(MAX_ORPHAN_TRANSACTIONS);
+                if (nEvicted > 0)
+                    printf("mapOrphan overflow, removed %u tx\n", nEvicted);
+            }
+            if (tx.nDoS) pfrom->Misbehaving(tx.nDoS);
         }
-        else if (fMissingInputs)
-        {
-            AddOrphanTx(vMsg);
-
-            // DoS prevention: do not allow mapOrphanTransactions to grow unbounded
-            unsigned int nEvicted = LimitOrphanTxSize(MAX_ORPHAN_TRANSACTIONS);
-            if (nEvicted > 0)
-                printf("mapOrphan overflow, removed %u tx\n", nEvicted);
-        }
-        if (tx.nDoS) pfrom->Misbehaving(tx.nDoS);
     }
 
 
@@ -3068,6 +3078,30 @@ bool static ProcessMessage(CNode* pfrom, string strCommand, CDataStream& vRecv)
         if (ProcessBlock(pfrom, &block))
             mapAlreadyAskedFor.erase(inv);
         if (block.nDoS) pfrom->Misbehaving(block.nDoS);
+    }
+
+
+    else if (strCommand == "relayblock")
+    {
+        CRelayBlock block;
+        vRecv >> block;
+
+        uint256 hash = block.GetBlockHash();
+
+        printf("received block header and tx hashes for block %s\n", hash.ToString().substr(0,20).c_str());
+        // block.print();
+
+        CInv inv(MSG_BLOCK, hash);
+        pfrom->AddInventoryKnown(inv);
+        mapAlreadyAskedFor.erase(inv);
+
+        block.FillFromMemPool(mempool);
+
+        vector<CInv> vTxInv;
+        mempoolBlocks.AddBlock(block, pfrom, vTxInv);
+
+        if (!vTxInv.empty())
+            pfrom->PushMessage("getdata", vTxInv);
     }
 
 
