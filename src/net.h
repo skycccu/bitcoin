@@ -76,6 +76,9 @@ enum
     // MSG_LIGHT_BLOCK can only be sent as a part of an inv or getdata.
     // Read the comment under getdata handling carefully before requesting these.
     MSG_LIGHT_BLOCK,
+    // Nodes may always request a MSG_FILTERED_BLOCK in a getdata, however,
+    // MSG_FILTERED_BLOCK should not appear in any invs except as a part of getdata.
+    MSG_FILTERED_BLOCK,
 };
 
 class CRequestTracker
