@@ -58,7 +58,8 @@ public:
     // (catch a filter which was just deserialized which was too big)
     bool IsWithinSizeConstraints() const;
 
-    bool IsTransactionRelevantToFilter(const CTransaction& tx) const;
+    // Also adds any outputs which match the filter to the filter (to match their spending txes)
+    bool IsRelevantAndUpdate(const CTransaction& tx);
 };
 
 #endif /* BITCOIN_BLOOM_H */
