@@ -2144,6 +2144,27 @@ bool CPendingRelayBlockPool::AddBlock(CRelayBlock& block, CNode* pfrom, vector<C
 
 
 
+CMerkleBlock::CMerkleBlock(const CBlock& block, CBloomFilter& filter)
+{
+    header = block.GetBlockHeader();
+    vtx.reserve(block.vtx.size());
+
+    for(unsigned int i = 0; i < block.vtx.size(); i++)
+        if (filter.IsRelevantAndUpdate(block.vtx[i]))
+        {
+            vector<uint256> branch = block.GetMerkleBranch(i);
+            uint256 hash = block.vtx[i].GetHash();
+            vtx.push_back(make_tuple(i, hash, branch));
+        }
+}
+
+
+
+
+
+
+
+
 bool CheckDiskSpace(uint64 nAdditionalBytes)
 {
     uint64 nFreeBytesAvailable = filesystem::space(GetDataDir()).available;

@@ -1736,4 +1736,34 @@ public:
     bool AddBlock(CRelayBlock& block, CNode* pfrom, std::vector<CInv>& missingInvsRet);
 };
 
+
+
+
+
+
+
+/** Used to relay blocks as header + vector<merkle branch>
+ * to filtered nodes.
+ */
+class CMerkleBlock
+{
+public:
+    CBlock header;
+
+    // We could optimize this a bit to deduplicate partial branches,
+    // but it's not worth much unless a node has a ton of txes in a single block
+    //                       tx index    , tx hash, merkle branch
+    std::vector<boost::tuple<unsigned int, uint256, std::vector<uint256> > > vtx;
+
+    // Create from a CBlock, filtering transactions according to filter
+    CMerkleBlock(const CBlock& block, CBloomFilter& filter);
+
+    IMPLEMENT_SERIALIZE
+    (
+        // Force header into SER_BLOCKHEADERONLY
+        nSerSize += ::SerReadWrite(s, header, nType|SER_BLOCKHEADERONLY, nVersion, ser_action);
+        READWRITE(vtx);
+    )
+};
+
 #endif
