@@ -2065,6 +2065,81 @@ uint256 CRelayBlock::GetBlockHash()
 
 
 
+bool CPendingRelayBlockPool::ProvideTransaction(const CTransaction& tx, const uint256& hash)
+{
+    bool fRet = false;
+    for (list<RelayedBlockTupleType>::iterator it = listUnfilledBlocks.begin(); it != listUnfilledBlocks.end(); it++)
+    {
+        set<uint256>& setMissingTxes = get<0>(*it);
+        set<uint256>::iterator itHash = setMissingTxes.find(hash);
+        if (itHash != setMissingTxes.end())
+        {
+            fRet = true;
+            CRelayBlock& block = get<1>(*it);
+            block.ProvideTransaction(tx);
+            block.GetMissingTransactions(setMissingTxes);
+            if (setMissingTxes.empty())
+            {
+                listFilledBlocks.push_back(make_pair(block, get<2>(*it)));
+                list<RelayedBlockTupleType>::iterator it2 = it;
+                it++;
+                listUnfilledBlocks.erase(it2);
+                it--;
+            }
+        }
+    }
+    return fRet;
+}
+
+bool CPendingRelayBlockPool::ProcessBlocks(bool fActuallyProcess)
+{
+    bool fRet = false;
+    for (list<pair<CRelayBlock, CNode*> >::iterator it = listFilledBlocks.begin(); it != listFilledBlocks.end(); it++)
+    {
+        CBlock filledBlock;
+        assert(it->first.GetBlock(filledBlock));
+
+        if (fActuallyProcess)
+            ProcessBlock(it->second, &filledBlock);
+        if (filledBlock.nDoS) it->second->Misbehaving(filledBlock.nDoS);
+        it->second->Release();
+
+        fRet = true;
+    }
+    listFilledBlocks.clear();
+    return fRet;
+}
+
+bool CPendingRelayBlockPool::AddBlock(CRelayBlock& block, CNode* pfrom, vector<CInv>& missingInvsRet)
+{
+    set<uint256> setMissingTxes;
+    block.GetMissingTransactions(setMissingTxes);
+    if (setMissingTxes.empty())
+    {
+        pfrom->AddRef();
+        listFilledBlocks.push_back(make_pair(block, pfrom));
+        return true;
+    }
+    else
+    {
+        pfrom->AddRef();
+        listUnfilledBlocks.push_back(make_tuple(setMissingTxes, block, pfrom));
+
+        missingInvsRet.clear();
+        missingInvsRet.reserve(setMissingTxes.size());
+        BOOST_FOREACH(const uint256& hash, setMissingTxes)
+            missingInvsRet.push_back(CInv(MSG_TX, hash));
+    }
+    return false;
+}
+
+
+
+
+
+
+
+
 bool CheckDiskSpace(uint64 nAdditionalBytes)
 {
     uint64 nFreeBytesAvailable = filesystem::space(GetDataDir()).available;

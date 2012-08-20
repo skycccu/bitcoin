@@ -1705,4 +1705,35 @@ public:
     uint256 GetBlockHash();
 };
 
+
+
+
+
+
+
+/** Used to keep a list of pending CRelayBlocks, and the txes they are missing
+ * Note that this structure is NOT thread-safe
+ */
+class CPendingRelayBlockPool
+{
+private:
+    typedef boost::tuple<std::set<uint256>, CRelayBlock, CNode*> RelayedBlockTupleType;
+    std::list<RelayedBlockTupleType> listUnfilledBlocks;
+    std::list<std::pair<CRelayBlock, CNode*> > listFilledBlocks;
+
+public:
+    // Returns true if the tx was added to any block
+    bool ProvideTransaction(const CTransaction& tx, const uint256& hash);
+
+    // Call ProcessBlock for every block for which we aren't missing txes
+    // Separated out to make testing more thorough
+    // Returns true if any blocks were processed
+    bool ProcessBlocks(bool fActuallyProcess=true);
+
+    // Add the given block to the pool
+    // Returns true if ProcessBlocks() should be called afterward
+    // Make sure to call FillFromMemoryPool on block before this
+    bool AddBlock(CRelayBlock& block, CNode* pfrom, std::vector<CInv>& missingInvsRet);
+};
+
 #endif
