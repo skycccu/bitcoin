@@ -128,6 +128,8 @@ class CInv
         std::string ToString() const;
         void print() const;
 
+        bool operator==(const CInv& inv2) { return inv2.type == type && inv2.hash == hash; }
+
     // TODO: make private (improves encapsulation)
     public:
         int type;
