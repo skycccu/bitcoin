@@ -1975,6 +1975,8 @@ CRelayBlock::CRelayBlock(const CBlock& block)
 
     // We don't bother filling in vtxCache as this is almost
     // certainly just going to be used to relay the block.
+    // Because this behavior is not tested for in test-cases,
+    // do not rely on it!
     vtx.reserve(block.vtx.size() - 1);
     vtxCache.resize(block.vtx.size() - 1);
     for(unsigned int i = 1; i < block.vtx.size(); i++)
