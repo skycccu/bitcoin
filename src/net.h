@@ -73,6 +73,9 @@ enum
 {
     MSG_TX = 1,
     MSG_BLOCK,
+    // MSG_LIGHT_BLOCK can only be sent as a part of an inv or getdata.
+    // Read the comment under getdata handling carefully before requesting these.
+    MSG_LIGHT_BLOCK,
 };
 
 class CRequestTracker
@@ -647,9 +650,11 @@ public:
 
 
 class CTransaction;
+class CBlock;
 void AddTransactionToRelayPool(const CTransaction& tx);
 void AddTransactionToRelayPool(const uint256& hash, const CDataStream& ss);
 void RelayTransaction(const CTransaction& tx);
 void RelayTransaction(const CTransaction& tx, const CDataStream& ss);
+void RelayBlock(const CBlock& block, const uint256& hash);
 
 #endif

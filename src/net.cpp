@@ -11,6 +11,7 @@
 #include "addrman.h"
 #include "ui_interface.h"
 #include "script.h"
+#include "checkpoints.h"
 
 #ifdef WIN32
 #include <string.h>
@@ -2067,4 +2068,23 @@ void RelayTransaction(const CTransaction& tx, const CDataStream& ss)
         } else
             pnode->PushInventory(inv);
     }
+}
+
+void RelayBlock(const CBlock& block, const uint256& hash)
+{
+    {
+        LOCK(cs_mapRelay);
+        BOOST_FOREACH(const CTransaction& tx, block.vtx)
+            AddTransactionToRelayPool(tx);
+    }
+
+    // Relay inventory, but don't relay old inventory during initial block download
+    int nBlockEstimate = Checkpoints::GetTotalBlocksEstimate();
+    LOCK(cs_vNodes);
+    BOOST_FOREACH(CNode* pnode, vNodes)
+        if (nBestHeight > (pnode->nStartingHeight != -1 ? pnode->nStartingHeight - 2000 : nBlockEstimate))
+        {
+            pnode->PushInventory(CInv(MSG_BLOCK, hash));
+            pnode->PushInventory(CInv(MSG_LIGHT_BLOCK, hash));
+        }
 }
