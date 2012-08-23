@@ -647,6 +647,8 @@ public:
 
 
 class CTransaction;
+void AddTransactionToRelayPool(const CTransaction& tx);
+void AddTransactionToRelayPool(const uint256& hash, const CDataStream& ss);
 void RelayTransaction(const CTransaction& tx);
 void RelayTransaction(const CTransaction& tx, const CDataStream& ss);
 

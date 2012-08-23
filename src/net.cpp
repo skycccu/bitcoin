@@ -2019,6 +2019,30 @@ instance_of_cnetcleanup;
 
 
 
+void AddTransactionToRelayPool(const CTransaction& tx)
+{
+    CDataStream ss(SER_NETWORK, PROTOCOL_VERSION);
+    ss.reserve(10000);
+    ss << tx;
+    AddTransactionToRelayPool(tx.GetHash(), ss);
+}
+
+void AddTransactionToRelayPool(const uint256& hash, const CDataStream& ss)
+{
+    LOCK(cs_mapRelay);
+    // Expire old relay messages
+    while (!vRelayExpiration.empty() && vRelayExpiration.front().first < GetTime())
+    {
+        mapRelay.erase(vRelayExpiration.front().second);
+        vRelayExpiration.pop_front();
+    }
+
+    // Save original serialized message so newer versions are preserved
+    CInv inv(MSG_TX, hash);
+    mapRelay.insert(std::make_pair(inv, ss));
+    vRelayExpiration.push_back(std::make_pair(GetTime() + 15 * 60, inv));
+}
+
 void RelayTransaction(const CTransaction& tx)
 {
     CDataStream ss(SER_NETWORK, PROTOCOL_VERSION);
@@ -2030,19 +2054,8 @@ void RelayTransaction(const CTransaction& tx)
 void RelayTransaction(const CTransaction& tx, const CDataStream& ss)
 {
     CInv inv(MSG_TX, tx.GetHash());
-    {
-        LOCK(cs_mapRelay);
-        // Expire old relay messages
-        while (!vRelayExpiration.empty() && vRelayExpiration.front().first < GetTime())
-        {
-            mapRelay.erase(vRelayExpiration.front().second);
-            vRelayExpiration.pop_front();
-        }
+    AddTransactionToRelayPool(inv.hash, ss);
 
-        // Save original serialized message so newer versions are preserved
-        mapRelay.insert(std::make_pair(inv, ss));
-        vRelayExpiration.push_back(std::make_pair(GetTime() + 15 * 60, inv));
-    }
     LOCK(cs_vNodes);
     BOOST_FOREACH(CNode* pnode, vNodes)
     {
