@@ -1711,14 +1711,15 @@ public:
 
 
 
-/** Used to keep a list of pending CRelayBlocks, and the txes they are missing
+/** Used to keep track of a pending CRelayBlock, the txes it is missing
+ * and to request full blocks if a block is not filled before the next one.
+ * Primarily abstracted for testing.
  * Note that this structure is NOT thread-safe
  */
-class CPendingRelayBlockPool
+class CPendingRelayBlock
 {
 private:
-    typedef boost::tuple<std::set<uint256>, CRelayBlock, CNode*> RelayedBlockTupleType;
-    std::list<RelayedBlockTupleType> listUnfilledBlocks;
+    boost::tuple<std::set<uint256>, CRelayBlock, CNode*> blockUnfilled;
     std::list<std::pair<CRelayBlock, CNode*> > listFilledBlocks;
 
 public:
@@ -1726,7 +1727,7 @@ public:
     bool ProvideTransaction(const CTransaction& tx, const uint256& hash);
 
     // Call ProcessBlock for every block for which we aren't missing txes
-    // Separated out to make testing more thorough
+    // Separated out to make testing easier
     // Returns true if any blocks were processed
     bool ProcessBlocks(bool fActuallyProcess=true);
 

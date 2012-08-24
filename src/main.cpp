@@ -24,7 +24,7 @@ set<CWallet*> setpwalletRegistered;
 
 CCriticalSection cs_main;
 
-CPendingRelayBlockPool mempoolBlocks;
+CPendingRelayBlock mempoolBlocks;
 
 CTxMemPool mempool;
 unsigned int nTransactionsUpdated = 0;
@@ -2069,33 +2069,23 @@ uint256 CRelayBlock::GetBlockHash()
 
 
 
-bool CPendingRelayBlockPool::ProvideTransaction(const CTransaction& tx, const uint256& hash)
+bool CPendingRelayBlock::ProvideTransaction(const CTransaction& tx, const uint256& hash)
 {
-    bool fRet = false;
-    for (list<RelayedBlockTupleType>::iterator it = listUnfilledBlocks.begin(); it != listUnfilledBlocks.end(); it++)
+    set<uint256>& setMissingTxes = get<0>(blockUnfilled);
+    set<uint256>::iterator itHash = setMissingTxes.find(hash);
+    if (itHash != setMissingTxes.end())
     {
-        set<uint256>& setMissingTxes = get<0>(*it);
-        set<uint256>::iterator itHash = setMissingTxes.find(hash);
-        if (itHash != setMissingTxes.end())
-        {
-            fRet = true;
-            CRelayBlock& block = get<1>(*it);
-            block.ProvideTransaction(tx);
-            block.GetMissingTransactions(setMissingTxes);
-            if (setMissingTxes.empty())
-            {
-                listFilledBlocks.push_back(make_pair(block, get<2>(*it)));
-                list<RelayedBlockTupleType>::iterator it2 = it;
-                it++;
-                listUnfilledBlocks.erase(it2);
-                it--;
-            }
-        }
+        CRelayBlock& block = get<1>(blockUnfilled);
+        block.ProvideTransaction(tx);
+        block.GetMissingTransactions(setMissingTxes);
+        if (setMissingTxes.empty())
+            listFilledBlocks.push_back(make_pair(block, get<2>(blockUnfilled)));
+        return true;
     }
-    return fRet;
+    return false;
 }
 
-bool CPendingRelayBlockPool::ProcessBlocks(bool fActuallyProcess)
+bool CPendingRelayBlock::ProcessBlocks(bool fActuallyProcess)
 {
     bool fRet = false;
     for (list<pair<CRelayBlock, CNode*> >::iterator it = listFilledBlocks.begin(); it != listFilledBlocks.end(); it++)
@@ -2114,7 +2104,7 @@ bool CPendingRelayBlockPool::ProcessBlocks(bool fActuallyProcess)
     return fRet;
 }
 
-bool CPendingRelayBlockPool::AddBlock(CRelayBlock& block, CNode* pfrom, vector<CInv>& missingInvsRet)
+bool CPendingRelayBlock::AddBlock(CRelayBlock& block, CNode* pfrom, vector<CInv>& missingInvsRet)
 {
     set<uint256> setMissingTxes;
     block.GetMissingTransactions(setMissingTxes);
