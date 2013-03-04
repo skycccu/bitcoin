@@ -633,7 +633,7 @@ void CTxMemPool::pruneSpent(const uint256 &hashTx, CCoins &coins)
 }
 
 bool CTxMemPool::accept(CValidationState &state, CTransaction &tx, bool fCheckInputs, bool fLimitFree,
-                        bool* pfMissingInputs)
+                        bool* pfMissingInputs, int nHeight)
 {
     if (pfMissingInputs)
         *pfMissingInputs = false;
@@ -782,7 +782,7 @@ bool CTxMemPool::accept(CValidationState &state, CTransaction &tx, bool fCheckIn
             printf("CTxMemPool::accept() : replacing tx %s with new version\n", ptxOld->GetHash().ToString().c_str());
             remove(*ptxOld);
         }
-        addUnchecked(hash, tx);
+        addUnchecked(hash, tx, nHeight);
     }
 
     ///// are we sure this is ok when loading transactions or restoring block txes
@@ -800,20 +800,20 @@ bool CTxMemPool::accept(CValidationState &state, CTransaction &tx, bool fCheckIn
 bool CTransaction::AcceptToMemoryPool(CValidationState &state, bool fCheckInputs, bool fLimitFree, bool* pfMissingInputs)
 {
     try {
-        return mempool.accept(state, *this, fCheckInputs, fLimitFree, pfMissingInputs);
+        return mempool.accept(state, *this, fCheckInputs, fLimitFree, pfMissingInputs, nBestHeight);
     } catch(std::runtime_error &e) {
         return state.Abort(_("System error: ") + e.what());
     }
 }
 
-bool CTxMemPool::addUnchecked(const uint256& hash, CTransaction &tx)
+bool CTxMemPool::addUnchecked(const uint256& hash, CTransaction &tx, int nHeight)
 {
     // Add to memory pool without checking anything.  Don't call this directly,
     // call CTxMemPool::accept to properly check the transaction first.
     {
-        mapTx[hash] = tx;
+        mapTx[hash] = make_pair(tx, nHeight);
         for (unsigned int i = 0; i < tx.vin.size(); i++)
-            mapNextTx[tx.vin[i].prevout] = CInPoint(&mapTx[hash], i);
+            mapNextTx[tx.vin[i].prevout] = CInPoint(&mapTx[hash].first, i);
         nTransactionsUpdated++;
     }
     return true;
@@ -873,7 +873,7 @@ void CTxMemPool::queryHashes(std::vector<uint256>& vtxid)
 
     LOCK(cs);
     vtxid.reserve(mapTx.size());
-    for (map<uint256, CTransaction>::iterator mi = mapTx.begin(); mi != mapTx.end(); ++mi)
+    for (map<uint256, pair<CTransaction, int> >::iterator mi = mapTx.begin(); mi != mapTx.end(); ++mi)
         vtxid.push_back((*mi).first);
 }
 
@@ -928,9 +928,9 @@ public:
 void CollectTransactionsForBlock(vector<TxPriority>& vecPriority, list<COrphan>& vOrphan, map<uint256, vector<COrphan*> >& mapDependers, CCoinsViewCache& view, int nHeight)
 {
     vecPriority.reserve(mempool.mapTx.size());
-    for (map<uint256, CTransaction>::iterator mi = mempool.mapTx.begin(); mi != mempool.mapTx.end(); ++mi)
+    for (map<uint256, pair<CTransaction, int> >::iterator mi = mempool.mapTx.begin(); mi != mempool.mapTx.end(); ++mi)
     {
-        CTransaction& tx = (*mi).second;
+        CTransaction& tx = (*mi).second.first;
         if (tx.IsCoinBase() || !tx.IsFinal())
             continue;
 
@@ -966,7 +966,7 @@ void CollectTransactionsForBlock(vector<TxPriority>& vecPriority, list<COrphan>&
                 }
                 mapDependers[txin.prevout.hash].push_back(porphan);
                 porphan->setDependsOn.insert(txin.prevout.hash);
-                nTotalIn += mempool.mapTx[txin.prevout.hash].vout[txin.prevout.n].nValue;
+                nTotalIn += mempool.mapTx[txin.prevout.hash].first.vout[txin.prevout.n].nValue;
                 continue;
             }
 
@@ -994,7 +994,7 @@ void CollectTransactionsForBlock(vector<TxPriority>& vecPriority, list<COrphan>&
             porphan->dFeePerKb = dFeePerKb;
         }
         else
-            vecPriority.push_back(TxPriority(dPriority, dFeePerKb, &(*mi).second));
+            vecPriority.push_back(TxPriority(dPriority, dFeePerKb, &(*mi).second.first));
     }
 }
 

@@ -2063,11 +2063,11 @@ class CTxMemPool
 {
 public:
     mutable CCriticalSection cs;
-    std::map<uint256, CTransaction> mapTx;
+    std::map<uint256, std::pair<CTransaction, int> > mapTx;
     std::map<COutPoint, CInPoint> mapNextTx;
 
-    bool accept(CValidationState &state, CTransaction &tx, bool fCheckInputs, bool fLimitFree, bool* pfMissingInputs);
-    bool addUnchecked(const uint256& hash, CTransaction &tx);
+    bool accept(CValidationState &state, CTransaction &tx, bool fCheckInputs, bool fLimitFree, bool* pfMissingInputs, int nHeight);
+    bool addUnchecked(const uint256& hash, CTransaction &tx, int nHeight);
     bool remove(const CTransaction &tx, bool fRecursive = false);
     bool removeConflicts(const CTransaction &tx);
     void clear();
@@ -2087,7 +2087,7 @@ public:
 
     CTransaction& lookup(uint256 hash)
     {
-        return mapTx[hash];
+        return mapTx[hash].first;
     }
 };
 
