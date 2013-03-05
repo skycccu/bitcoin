@@ -883,12 +883,14 @@ class COrphan
 public:
     CTransaction* ptx;
     set<uint256> setDependsOn;
+    int nHeight;
     double dPriority;
     double dFeePerKb;
 
-    COrphan(CTransaction* ptxIn)
+    COrphan(CTransaction* ptxIn, int nHeightIn)
     {
         ptx = ptxIn;
+        nHeight = nHeightIn;
         dPriority = dFeePerKb = 0;
     }
 
@@ -902,7 +904,8 @@ public:
 };
 
 // We want to sort transactions by priority and fee, so:
-typedef boost::tuple<double, double, CTransaction*> TxPriority;
+//               priority, feePerKb, height
+typedef boost::tuple<double, double, int, CTransaction*> TxPriority;
 class TxPriorityCompare
 {
     bool byFee;
@@ -961,7 +964,7 @@ void CollectTransactionsForBlock(vector<TxPriority>& vecPriority, list<COrphan>&
                 if (!porphan)
                 {
                     // Use list for automatic deletion
-                    vOrphan.push_back(COrphan(&tx));
+                    vOrphan.push_back(COrphan(&tx, nHeight));
                     porphan = &vOrphan.back();
                 }
                 mapDependers[txin.prevout.hash].push_back(porphan);
@@ -994,9 +997,52 @@ void CollectTransactionsForBlock(vector<TxPriority>& vecPriority, list<COrphan>&
             porphan->dFeePerKb = dFeePerKb;
         }
         else
-            vecPriority.push_back(TxPriority(dPriority, dFeePerKb, &(*mi).second.first));
+            vecPriority.push_back(TxPriority(dPriority, dFeePerKb, (*mi).second.second, &(*mi).second.first));
     }
 }
+
+double CTxMemPool::feePerKbOrPriorityRequiredForNextFewBlocks(bool fFeePerKb)
+{
+    LOCK2(cs_main, mempool.cs);
+    vector<TxPriority> vecPriority;
+    list<COrphan> vOrphan;
+    vecPriority.reserve(mempool.mapTx.size());
+    CCoinsViewCache view(*pcoinsTip, true);
+    map<uint256, vector<COrphan*> > mapDependers;
+
+    // Collect the set of mineable transactions
+    CollectTransactionsForBlock(vecPriority, vOrphan, mapDependers, view, nBestHeight + 1);
+
+    TxPriorityCompare comparer(fFeePerKb);
+    std::make_heap(vecPriority.begin(), vecPriority.end(), comparer);
+
+    double nTotal = 0;
+    unsigned int nTxCount = 0;
+    // We look for the FEE_POLICY_TOP_N_TX txn with highest fee/priority in mempool
+    while (nTxCount < FEE_POLICY_TOP_N_TX && !vecPriority.empty())
+    {
+        TxPriority& tx = vecPriority.front();
+        std::pop_heap(vecPriority.begin(), vecPriority.end(), comparer);
+        vecPriority.pop_back();
+
+        // Must have been in mempool for at least FEE_POLICY_DETERMINATION_BLOCKS blocks
+        if (tx.get<2>() < nBestHeight - FEE_POLICY_DETERMINATION_BLOCKS)
+        {
+            nTotal += fFeePerKb ? tx.get<1>() : tx.get<0>();
+            nTxCount++;
+        }
+    }
+
+    // We consider FEE_POLICY_TOP_N_TX txn the requirement for a statistically significant sample
+    // If we get less than that, return a sentinel and let GetMinFee figure out what to do.
+    // Note that this can happen both because we recently restarted (and simply have an empty mempool)
+    // or because miners are filling blocks and emptying the mempool rather quickly (!!!)
+    if (nTxCount == FEE_POLICY_TOP_N_TX)
+        return nTotal / nTxCount;
+    else
+        return INFINITY;
+}
+
 
 
 
@@ -4299,7 +4345,7 @@ CBlockTemplate* CreateNewBlock(CReserveKey& reservekey)
             // Take highest priority transaction off the priority queue:
             double dPriority = vecPriority.front().get<0>();
             double dFeePerKb = vecPriority.front().get<1>();
-            CTransaction& tx = *(vecPriority.front().get<2>());
+            CTransaction& tx = *(vecPriority.front().get<3>());
 
             std::pop_heap(vecPriority.begin(), vecPriority.end(), comparer);
             vecPriority.pop_back();
@@ -4377,7 +4423,7 @@ CBlockTemplate* CreateNewBlock(CReserveKey& reservekey)
                         porphan->setDependsOn.erase(hash);
                         if (porphan->setDependsOn.empty())
                         {
-                            vecPriority.push_back(TxPriority(porphan->dPriority, porphan->dFeePerKb, porphan->ptx));
+                            vecPriority.push_back(TxPriority(porphan->dPriority, porphan->dFeePerKb, porphan->nHeight, porphan->ptx));
                             std::push_heap(vecPriority.begin(), vecPriority.end(), comparer);
                         }
                     }

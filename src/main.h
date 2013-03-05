@@ -57,6 +57,12 @@ static const int COINBASE_MATURITY = 100;
 static const unsigned int LOCKTIME_THRESHOLD = 500000000; // Tue Nov  5 00:53:20 1985 UTC
 /** Maximum number of script-checking threads allowed */
 static const int MAX_SCRIPTCHECK_THREADS = 16;
+/** Number of blocks to look at when determining fee/priority policy */
+//TODO: 6???
+static const int FEE_POLICY_DETERMINATION_BLOCKS = 6;
+/** Number of transactions to average when determining fee/priority policy */
+//TODO 10?????
+static const unsigned int FEE_POLICY_TOP_N_TX = 10;
 #ifdef USE_UPNP
 static const int fHaveUPnP = true;
 #else
@@ -2073,6 +2079,28 @@ public:
     void clear();
     void queryHashes(std::vector<uint256>& vtxid);
     void pruneSpent(const uint256& hash, CCoins &coins);
+
+    /** Gets the fee or priority required for a transaction to be
+        mined in the next FEE_POLICY_DETERMINATION_BLOCKS blocks.
+
+        This is done by examining the set of mineable transactions
+        that have been in memory pool for at least that many blocks
+        and averaging the fee/priority of the FEE_POLICY_TOP_N_TX
+        with the highest fee/priority.  Note that this means that
+        the value returned will likely just barely NOT be sufficient,
+        use CTransaction::GetMinFee() if you want to overestimate
+        enough for transaction creation.
+
+        Additionally note that this is both fairly expensive (it
+        performs transaction collection as if we were mining a block)
+        and returns INFINITY if we have not been running long enough,
+        thus it is probably best to always use CTransaction::GetMinFee()
+        instead.
+
+        @param[in]	fFeePerKb	Whether to get min fee or priority.
+        @return		INFINITY	When not enough transactions were present in memory pool.
+     */
+    double feePerKbOrPriorityRequiredForNextFewBlocks(bool fFeePerKb);
 
     unsigned long size()
     {
