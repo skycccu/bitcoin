@@ -63,6 +63,8 @@ static const int FEE_POLICY_DETERMINATION_BLOCKS = 6;
 /** Number of transactions to average when determining fee/priority policy */
 //TODO 10?????
 static const unsigned int FEE_POLICY_TOP_N_TX = 10;
+/** Factor by which the mempool-derived minimum fee/priority are multiplied when checking our own transactions */
+static const double FEE_POLICY_FACTOR = 1.1;
 #ifdef USE_UPNP
 static const int fHaveUPnP = true;
 #else
@@ -460,13 +462,6 @@ public:
 
 
 
-enum GetMinFee_mode
-{
-    GMF_BLOCK,
-    GMF_RELAY,
-    GMF_SEND,
-};
-
 /** The basic transaction that is broadcasted on the network and contained in
  * blocks. A transaction can contain multiple inputs and outputs.
  */
@@ -609,13 +604,6 @@ public:
      */
     int64 GetValueIn(CCoinsViewCache& mapInputs) const;
 
-    static bool AllowFree(double dPriority)
-    {
-        // Large (in bytes) low-priority (new, small-coin) transactions
-        // need a fee.
-        return dPriority > COIN * 144 / 250;
-    }
-
     /** Gets the priority of this transaction at height nHeight
 
         @param[in] mPrevouts	A map of COutPoint->pair<value, height> which contains all outputs which are spent by this transaction
@@ -623,7 +611,17 @@ public:
      */
     double GetPriority(const std::map<COutPoint, std::pair<int64, int> >& mPrevouts, int nHeight) const;
 
-    int64 GetMinFee(unsigned int nBlockSize=1, bool fAllowFree=true, enum GetMinFee_mode mode=GMF_BLOCK) const;
+    /** Gets the minimum fee required to create a transaction
+        This is calculated based on the memory pool (if we've been running for a while)
+        Or based on recent blocks if we do not have enough memory pool history.
+
+        The result is somewhat conservative but tries its best to just barely overestimate
+        the requirement to get into the next FEE_POLICY_DETERMINATION_BLOCKS blocks (see
+        CTxMemPool::feePerKbOrPriorityRequiredForNextFewBlocks()).
+
+        @param[in] dPriority	The calculated priority of the transaction (needed because we don't know input values)
+     */
+    int64 GetMinFee(double dPriority) const;
 
     friend bool operator==(const CTransaction& a, const CTransaction& b)
     {

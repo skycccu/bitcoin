@@ -583,52 +583,34 @@ double CTransaction::GetPriority(const std::map<COutPoint, std::pair<int64, int>
     return dPriority / ::GetSerializeSize(*this, SER_NETWORK, PROTOCOL_VERSION);
 }
 
-int64 CTransaction::GetMinFee(unsigned int nBlockSize, bool fAllowFree,
-                              enum GetMinFee_mode mode) const
+int64 CTransaction::GetMinFee(double dPriority) const
 {
-    // Base fee is either MIN_TX_FEE or MIN_RELAY_TX_FEE
-    int64 nBaseFee = (mode == GMF_RELAY) ? MIN_RELAY_TX_FEE : MIN_TX_FEE;
+    // We cache the mempool-provided info for at least each block
+    static int lastUpdateBestHeight = 0;
+    static double dFeePerKbRequired = -1;
+    static double dPriorityRequired = -1;
+    if (dFeePerKbRequired == -1 || lastUpdateBestHeight < nBestHeight)
+    {
+        lastUpdateBestHeight = nBestHeight;
+        dFeePerKbRequired = mempool.feePerKbOrPriorityRequiredForNextFewBlocks(true);
+        dPriorityRequired = mempool.feePerKbOrPriorityRequiredForNextFewBlocks(false);
+    }
+
+    if (dFeePerKbRequired == INFINITY)
+    {
+        // TODO: Get from recent blocks
+        dFeePerKbRequired = 0;
+        dPriorityRequired = 0;
+    }
 
     unsigned int nBytes = ::GetSerializeSize(*this, SER_NETWORK, PROTOCOL_VERSION);
-    unsigned int nNewBlockSize = nBlockSize + nBytes;
-    int64 nMinFee = (1 + (int64)nBytes / 1000) * nBaseFee;
+    int64 nFeeRequired = ceil(dFeePerKbRequired * nBytes / 1000.0) * FEE_POLICY_FACTOR;
 
-    if (fAllowFree)
-    {
-        if (nBlockSize == 1)
-        {
-            // Transactions under 10K are free
-            // (about 4500 BTC if made of 50 BTC inputs)
-            if (nBytes < 10000)
-                nMinFee = 0;
-        }
-        else
-        {
-            // Free transaction area
-            if (nNewBlockSize < 27000)
-                nMinFee = 0;
-        }
-    }
-
-    // To limit dust spam, require MIN_TX_FEE/MIN_RELAY_TX_FEE if any output is less than 0.01
-    if (nMinFee < nBaseFee)
-    {
-        BOOST_FOREACH(const CTxOut& txout, vout)
-            if (txout.nValue < CENT)
-                nMinFee = nBaseFee;
-    }
-
-    // Raise the price as the block approaches full
-    if (nBlockSize != 1 && nNewBlockSize >= MAX_BLOCK_SIZE_GEN/2)
-    {
-        if (nNewBlockSize >= MAX_BLOCK_SIZE_GEN)
-            return MAX_MONEY;
-        nMinFee *= MAX_BLOCK_SIZE_GEN / (MAX_BLOCK_SIZE_GEN - nNewBlockSize);
-    }
-
-    if (!MoneyRange(nMinFee))
-        nMinFee = MAX_MONEY;
-    return nMinFee;
+    // We simply require the value from feePerKbOrPriorityRequiredForNextFewBlocks * FEE_POLICY_FACTOR
+    if (dPriority >= dPriorityRequired * FEE_POLICY_FACTOR)
+        return 0;
+    else
+        return !MoneyRange(nFeeRequired) ? MAX_MONEY : nFeeRequired;
 }
 
 void CTxMemPool::pruneSpent(const uint256 &hashTx, CCoins &coins)
@@ -758,14 +740,7 @@ bool CTxMemPool::accept(CValidationState &state, CTransaction &tx, bool fEnforce
         // reasonable number of ECDSA signature verifications.
 
         nFees = tx.GetValueIn(view)-tx.GetValueOut();
-
-        // Don't accept it if it can't get into a block
         dPriority = tx.GetPriority(mapPrevouts, nHeight);
-        int64 txMinFee = tx.GetMinFee(GMF_RELAY, dPriority);
-        if (fEnforceMemoryLimits && nFees < txMinFee)
-            return error("CTxMemPool::accept() : not enough fees %s, %"PRI64d" < %"PRI64d,
-                         hash.ToString().c_str(),
-                         nFees, txMinFee);
 
         // Check against previous transactions
         // This is done last to help prevent CPU exhaustion denial-of-service attacks.
