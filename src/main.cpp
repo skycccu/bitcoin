@@ -571,6 +571,18 @@ bool CTransaction::CheckTransaction(CValidationState &state) const
     return true;
 }
 
+double CTransaction::GetPriority(const std::map<COutPoint, std::pair<int64, int> >& mPrevouts, int nHeight) const
+{
+    double dPriority = 0;
+    BOOST_FOREACH(const CTxIn& in, vin)
+    {
+        map<COutPoint, std::pair<int64, int> >::const_iterator it = mPrevouts.find(in.prevout);
+        assert(it != mPrevouts.end());
+        dPriority += it->second.first * (nHeight - it->second.second);
+    }
+    return dPriority / ::GetSerializeSize(*this, SER_NETWORK, PROTOCOL_VERSION);
+}
+
 int64 CTransaction::GetMinFee(unsigned int nBlockSize, bool fAllowFree,
                               enum GetMinFee_mode mode) const
 {
@@ -632,7 +644,7 @@ void CTxMemPool::pruneSpent(const uint256 &hashTx, CCoins &coins)
     }
 }
 
-bool CTxMemPool::accept(CValidationState &state, CTransaction &tx, bool fLimitFree,
+bool CTxMemPool::accept(CValidationState &state, CTransaction &tx, bool fEnforceMemoryLimits,
                         bool* pfMissingInputs, int nHeight)
 {
     if (pfMissingInputs)
@@ -689,9 +701,14 @@ bool CTxMemPool::accept(CValidationState &state, CTransaction &tx, bool fLimitFr
         }
     }
 
+    double dPriority;
+    int64 nFees;
     {
         CCoinsView dummy;
         CCoinsViewCache view(dummy);
+
+        // value and heights for priority calculations
+        map<COutPoint, pair<int64, int> > mapPrevouts;
 
         {
         LOCK(cs);
@@ -717,6 +734,14 @@ bool CTxMemPool::accept(CValidationState &state, CTransaction &tx, bool fLimitFr
         if (!tx.HaveInputs(view))
             return state.Invalid(error("CTxMemPool::accept() : inputs already spent"));
 
+        // get inputs for priority calculation
+        // TODO: remove duplicate db calls between this and tx.HaveInputs
+        BOOST_FOREACH(const CTxIn& txin, tx.vin) {
+            CCoins coins;
+            assert(view.GetCoins(txin.prevout.hash, coins));
+            mapPrevouts[txin.prevout] = make_pair(coins.vout[txin.prevout.n].nValue, coins.nHeight);
+        }
+
         // Bring the best block into scope
         view.GetBestBlock();
 
@@ -732,38 +757,15 @@ bool CTxMemPool::accept(CValidationState &state, CTransaction &tx, bool fLimitFr
         // you should add code here to check that the transaction does a
         // reasonable number of ECDSA signature verifications.
 
-        int64 nFees = tx.GetValueIn(view)-tx.GetValueOut();
-        unsigned int nSize = ::GetSerializeSize(tx, SER_NETWORK, PROTOCOL_VERSION);
+        nFees = tx.GetValueIn(view)-tx.GetValueOut();
 
         // Don't accept it if it can't get into a block
-        int64 txMinFee = tx.GetMinFee(1000, true, GMF_RELAY);
-        if (fLimitFree && nFees < txMinFee)
+        dPriority = tx.GetPriority(mapPrevouts, nHeight);
+        int64 txMinFee = tx.GetMinFee(GMF_RELAY, dPriority);
+        if (fEnforceMemoryLimits && nFees < txMinFee)
             return error("CTxMemPool::accept() : not enough fees %s, %"PRI64d" < %"PRI64d,
                          hash.ToString().c_str(),
                          nFees, txMinFee);
-
-        // Continuously rate-limit free transactions
-        // This mitigates 'penny-flooding' -- sending thousands of free transactions just to
-        // be annoying or make others' transactions take longer to confirm.
-        if (fLimitFree && nFees < MIN_RELAY_TX_FEE)
-        {
-            static double dFreeCount;
-            static int64 nLastTime;
-            int64 nNow = GetTime();
-
-            LOCK(cs);
-
-            // Use an exponentially decaying ~10-minute window:
-            dFreeCount *= pow(1.0 - 1.0/600.0, (double)(nNow - nLastTime));
-            nLastTime = nNow;
-            // -limitfreerelay unit is thousand-bytes-per-minute
-            // At default rate it would take over a month to fill 1GB
-            if (dFreeCount >= GetArg("-limitfreerelay", 15)*10*1000)
-                return error("CTxMemPool::accept() : free transaction rejected by rate limiter");
-            if (fDebug)
-                printf("Rate limit dFreeCount: %g => %g\n", dFreeCount, dFreeCount+nSize);
-            dFreeCount += nSize;
-        }
 
         // Check against previous transactions
         // This is done last to help prevent CPU exhaustion denial-of-service attacks.
@@ -781,7 +783,7 @@ bool CTxMemPool::accept(CValidationState &state, CTransaction &tx, bool fLimitFr
             printf("CTxMemPool::accept() : replacing tx %s with new version\n", ptxOld->GetHash().ToString().c_str());
             remove(*ptxOld);
         }
-        addUnchecked(hash, tx, nHeight);
+        addUnchecked(hash, tx, fEnforceMemoryLimits ? dPriority : numeric_limits<double>::infinity(), nFees, ::GetSerializeSize(tx, SER_NETWORK, PROTOCOL_VERSION), nHeight);
     }
 
     ///// are we sure this is ok when loading transactions or restoring block txes
@@ -790,31 +792,42 @@ bool CTxMemPool::accept(CValidationState &state, CTransaction &tx, bool fLimitFr
         EraseFromWallets(ptxOld->GetHash());
     SyncWithWallets(hash, tx, NULL, true);
 
-    printf("CTxMemPool::accept() : accepted %s (poolsz %"PRIszu")\n",
+    printf("CTxMemPool::accept() : accepted %s (poolsz %"PRIszu", mem %u)\n",
            hash.ToString().c_str(),
-           mapTx.size());
+           mapTx.size(),
+           nMemPoolSize);
     return true;
 }
 
-bool CTransaction::AcceptToMemoryPool(CValidationState &state, bool fLimitFree, bool* pfMissingInputs)
+bool CTransaction::AcceptToMemoryPool(CValidationState &state, bool fEnforceMemoryLimits, bool* pfMissingInputs)
 {
     try {
-        return mempool.accept(state, *this, fLimitFree, pfMissingInputs, nBestHeight);
+        return mempool.accept(state, *this, fEnforceMemoryLimits, pfMissingInputs, nBestHeight);
     } catch(std::runtime_error &e) {
         return state.Abort(_("System error: ") + e.what());
     }
 }
 
-bool CTxMemPool::addUnchecked(const uint256& hash, CTransaction &tx, int nHeight)
+bool CTxMemPool::addUnchecked(const uint256& hash, CTransaction &tx, double dPriority, int64 nTxFee, unsigned int nTxSize, int nHeight)
 {
     // Add to memory pool without checking anything.  Don't call this directly,
     // call CTxMemPool::accept to properly check the transaction first.
     {
-        mapTx[hash] = make_pair(tx, nHeight);
+        double dFeePerKb = double(nTxFee)/(double(nTxSize)/1000.0);
+        mapTx[hash] = make_pair(tx, make_tuple(nHeight, dPriority, dFeePerKb));
         for (unsigned int i = 0; i < tx.vin.size(); i++)
             mapNextTx[tx.vin[i].prevout] = CInPoint(&mapTx[hash].first, i);
+
+        CTransaction* ptx = &(mapTx[hash].first);
+        mapTxByPriorityWhenAdded.insert(make_pair(dPriority, make_pair(ptx, nTxSize)));
+        mapTxByFeePerKb.insert(make_pair(dFeePerKb, make_pair(ptx, nTxSize)));
+        mapTxByHeightWhenAdded.insert(make_pair(nHeight, ptx));
+
+        nMemPoolSize += nTxSize;
         nTransactionsUpdated++;
     }
+    if (nMemPoolSize > GetArg("-maxmempoolsize", MAX_BLOCK_SIZE*10))
+        LimitSize();
     return true;
 }
 
@@ -825,8 +838,39 @@ bool CTxMemPool::remove(const CTransaction &tx, bool fRecursive)
     {
         LOCK(cs);
         uint256 hash = tx.GetHash();
-        if (mapTx.count(hash))
+        map<uint256, pair<CTransaction, tuple<int, double, double> > >::iterator it = mapTx.find(hash);
+        if (it != mapTx.end())
         {
+            CTransaction* ptx = &(it->second.first);
+            pair<multimap<int, CTransaction*>::iterator, multimap<int, CTransaction*>::iterator> pairHeightIt = mapTxByHeightWhenAdded.equal_range(get<0>(it->second.second));
+            for (multimap<int, CTransaction*>::iterator itHeight = pairHeightIt.first; itHeight != pairHeightIt.second; ++itHeight)
+            {
+                if (itHeight->second == ptx)
+                {
+                    mapTxByHeightWhenAdded.erase(itHeight);
+                    break;
+                }
+            }
+            pair<multimap<double, std::pair<CTransaction*, int> >::iterator, multimap<double, std::pair<CTransaction*, int> >::iterator> pairPrioIt = mapTxByPriorityWhenAdded.equal_range(get<1>(it->second.second));
+            for (multimap<double, std::pair<CTransaction*, int> >::iterator itPrio = pairPrioIt.first; itPrio != pairPrioIt.second; ++itPrio)
+            {
+                if (itPrio->second.first == ptx)
+                {
+                    mapTxByPriorityWhenAdded.erase(itPrio);
+                    break;
+                }
+            }
+            pair<multimap<double, std::pair<CTransaction*, int> >::iterator, multimap<double, std::pair<CTransaction*, int> >::iterator> pairFeeIt = mapTxByFeePerKb.equal_range(get<2>(it->second.second));
+            for (multimap<double, std::pair<CTransaction*, int> >::iterator itFeePerKb = pairFeeIt.first; itFeePerKb != pairFeeIt.second; ++itFeePerKb)
+            {
+                if (itFeePerKb->second.first == ptx)
+                {
+                    nMemPoolSize -= itFeePerKb->second.second;
+                    mapTxByFeePerKb.erase(itFeePerKb);
+                    break;
+                }
+            }
+
             if (fRecursive) {
                 for (unsigned int i = 0; i < tx.vout.size(); i++) {
                     std::map<COutPoint, CInPoint>::iterator it = mapNextTx.find(COutPoint(hash, i));
@@ -861,9 +905,13 @@ bool CTxMemPool::removeConflicts(const CTransaction &tx)
 void CTxMemPool::clear()
 {
     LOCK(cs);
+    mapTxByPriorityWhenAdded.clear();
+    mapTxByFeePerKb.clear();
+    mapTxByHeightWhenAdded.clear();
     mapTx.clear();
     mapNextTx.clear();
     ++nTransactionsUpdated;
+    nMemPoolSize = 0;
 }
 
 void CTxMemPool::queryHashes(std::vector<uint256>& vtxid)
@@ -872,8 +920,48 @@ void CTxMemPool::queryHashes(std::vector<uint256>& vtxid)
 
     LOCK(cs);
     vtxid.reserve(mapTx.size());
-    for (map<uint256, pair<CTransaction, int> >::iterator mi = mapTx.begin(); mi != mapTx.end(); ++mi)
+    for (map<uint256, pair<CTransaction, tuple<int, double, double> > >::iterator mi = mapTx.begin(); mi != mapTx.end(); ++mi)
         vtxid.push_back((*mi).first);
+}
+
+void CTxMemPool::LimitSize()
+{
+    int nBestHeightTarget;
+    { LOCK(cs_main); nBestHeightTarget = nBestHeight - 144; } // Blocks are removed after 1 days worth of blocks
+    set<CTransaction*> sTxToRemove;
+
+    for (multimap<int, CTransaction*>::iterator mi = mapTxByHeightWhenAdded.begin(); mi != mapTxByHeightWhenAdded.end() && mi->first < nBestHeightTarget; ++mi)
+        sTxToRemove.insert(mi->second);
+    BOOST_FOREACH(CTransaction* tx, sTxToRemove)
+        remove(*tx, true);
+
+    if (nMemPoolSize <= GetArg("-mempoolsize", MAX_BLOCK_SIZE*9))
+        return;
+
+    sTxToRemove.clear();
+    for (map<uint256, pair<CTransaction, tuple<int, double, double> > >::iterator mi = mapTx.begin(); mi != mapTx.end(); ++mi)
+        sTxToRemove.insert(&(*mi).second.first);
+
+    typedef map<double, pair<CTransaction*, int> > map_type;
+    int nSizeRemoved = 0;
+    BOOST_REVERSE_FOREACH(map_type::value_type it, mapTxByFeePerKb)
+    {
+        sTxToRemove.erase(it.second.first);
+        nSizeRemoved += it.second.second;
+        if (nSizeRemoved > GetArg("-mempoolsize", MAX_BLOCK_SIZE*9)*7/9)
+            break;
+    }
+    nSizeRemoved = 0;
+    BOOST_REVERSE_FOREACH(map_type::value_type it, mapTxByPriorityWhenAdded)
+    {
+        sTxToRemove.erase(it.second.first);
+        nSizeRemoved += it.second.second;
+        if (nSizeRemoved > GetArg("-mempoolsize", MAX_BLOCK_SIZE*9)*2/9)
+            break;
+    }
+
+    BOOST_FOREACH(CTransaction* tx, sTxToRemove)
+        remove(*tx, true);
 }
 
 // Some explaining would be appreciated
@@ -930,16 +1018,16 @@ public:
 void CollectTransactionsForBlock(vector<TxPriority>& vecPriority, list<COrphan>& vOrphan, map<uint256, vector<COrphan*> >& mapDependers, CCoinsViewCache& view, int nHeight)
 {
     vecPriority.reserve(mempool.mapTx.size());
-    for (map<uint256, pair<CTransaction, int> >::iterator mi = mempool.mapTx.begin(); mi != mempool.mapTx.end(); ++mi)
+    for (map<uint256, pair<CTransaction, tuple<int, double, double> > >::iterator mi = mempool.mapTx.begin(); mi != mempool.mapTx.end(); ++mi)
     {
         CTransaction& tx = (*mi).second.first;
         if (tx.IsCoinBase() || !tx.IsFinal())
             continue;
 
         COrphan* porphan = NULL;
-        double dPriority = 0;
         int64 nTotalIn = 0;
         bool fMissingInputs = false;
+        map<COutPoint, pair<int64, int> > mapPrevouts;
         BOOST_FOREACH(const CTxIn& txin, tx.vin)
         {
             // Read prev transaction
@@ -968,22 +1056,23 @@ void CollectTransactionsForBlock(vector<TxPriority>& vecPriority, list<COrphan>&
                 }
                 mapDependers[txin.prevout.hash].push_back(porphan);
                 porphan->setDependsOn.insert(txin.prevout.hash);
-                nTotalIn += mempool.mapTx[txin.prevout.hash].first.vout[txin.prevout.n].nValue;
+
+                int64 nValueIn = mempool.mapTx[txin.prevout.hash].first.vout[txin.prevout.n].nValue;
+                nTotalIn += nValueIn;
+                mapPrevouts[txin.prevout] = make_pair(nValueIn, nHeight);
                 continue;
             }
 
             int64 nValueIn = coins.vout[txin.prevout.n].nValue;
             nTotalIn += nValueIn;
 
-            int nConf = nHeight - coins.nHeight;
-
-            dPriority += (double)nValueIn * nConf;
+            mapPrevouts[txin.prevout] = make_pair(nValueIn, coins.nHeight);
         }
         if (fMissingInputs) continue;
 
-        // Priority is sum(valuein * age) / txsize
+        double dPriority = tx.GetPriority(mapPrevouts, nHeight);
+
         unsigned int nTxSize = ::GetSerializeSize(tx, SER_NETWORK, PROTOCOL_VERSION);
-        dPriority /= nTxSize;
 
         // This is a more accurate fee-per-kilobyte than is used by the client code, because the
         // client code rounds up the size to the nearest 1K. That's good, because it gives an
@@ -996,7 +1085,7 @@ void CollectTransactionsForBlock(vector<TxPriority>& vecPriority, list<COrphan>&
             porphan->dFeePerKb = dFeePerKb;
         }
         else
-            vecPriority.push_back(TxPriority(dPriority, dFeePerKb, (*mi).second.second, &(*mi).second.first));
+            vecPriority.push_back(TxPriority(dPriority, dFeePerKb, get<0>((*mi).second.second), &(*mi).second.first));
     }
 }
 
@@ -1079,10 +1168,10 @@ int CMerkleTx::GetBlocksToMaturity() const
 }
 
 
-bool CMerkleTx::AcceptToMemoryPool(bool fLimitFree)
+bool CMerkleTx::AcceptToMemoryPool(bool fEnforceMemoryLimits)
 {
     CValidationState state;
-    return CTransaction::AcceptToMemoryPool(state, fLimitFree);
+    return CTransaction::AcceptToMemoryPool(state, fEnforceMemoryLimits);
 }
 
 

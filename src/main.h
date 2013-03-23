@@ -616,6 +616,13 @@ public:
         return dPriority > COIN * 144 / 250;
     }
 
+    /** Gets the priority of this transaction at height nHeight
+
+        @param[in] mPrevouts	A map of COutPoint->pair<value, height> which contains all outputs which are spent by this transaction
+        @param[in] dPriority	The height
+     */
+    double GetPriority(const std::map<COutPoint, std::pair<int64, int> >& mPrevouts, int nHeight) const;
+
     int64 GetMinFee(unsigned int nBlockSize=1, bool fAllowFree=true, enum GetMinFee_mode mode=GMF_BLOCK) const;
 
     friend bool operator==(const CTransaction& a, const CTransaction& b)
@@ -671,7 +678,7 @@ public:
     bool CheckTransaction(CValidationState &state) const;
 
     // Try to accept this transaction into the memory pool
-    bool AcceptToMemoryPool(CValidationState &state, bool fLimitFree=true, bool* pfMissingInputs=NULL);
+    bool AcceptToMemoryPool(CValidationState &state, bool fEnforceMemoryLimits=true, bool* pfMissingInputs=NULL);
 
 protected:
     static const CTxOut &GetOutputFor(const CTxIn& input, CCoinsViewCache& mapInputs);
@@ -1150,7 +1157,7 @@ public:
     int GetDepthInMainChain() const { CBlockIndex *pindexRet; return GetDepthInMainChain(pindexRet); }
     bool IsInMainChain() const { return GetDepthInMainChain() > 0; }
     int GetBlocksToMaturity() const;
-    bool AcceptToMemoryPool(bool fLimitFree=true);
+    bool AcceptToMemoryPool(bool fEnforceMemoryLimits=true);
 };
 
 
@@ -2067,13 +2074,22 @@ public:
 
 class CTxMemPool
 {
+private:
+    // These are all used to limit mempool size
+    //                pointer to tx in mapTx, size of tx
+    std::multimap<double, std::pair<CTransaction*, int> > mapTxByPriorityWhenAdded;
+    std::multimap<double, std::pair<CTransaction*, int> > mapTxByFeePerKb;
+    std::multimap<int, CTransaction*> mapTxByHeightWhenAdded;
+    unsigned int nMemPoolSize;
+
 public:
     mutable CCriticalSection cs;
-    std::map<uint256, std::pair<CTransaction, int> > mapTx;
+    //        hash                                     height, priority, feePerKb
+    std::map<uint256, std::pair<CTransaction, boost::tuple<int, double, double> > > mapTx;
     std::map<COutPoint, CInPoint> mapNextTx;
 
-    bool accept(CValidationState &state, CTransaction &tx, bool fLimitFree, bool* pfMissingInputs, int nHeight);
-    bool addUnchecked(const uint256& hash, CTransaction &tx, int nHeight);
+    bool accept(CValidationState &state, CTransaction &tx, bool fEnforceMemoryLimits, bool* pfMissingInputs, int nHeight);
+    bool addUnchecked(const uint256& hash, CTransaction &tx, double dPriority, int64 nTxFee, unsigned int nTxSize, int nHeight);
     bool remove(const CTransaction &tx, bool fRecursive = false);
     bool removeConflicts(const CTransaction &tx);
     void clear();
@@ -2101,6 +2117,10 @@ public:
         @return		INFINITY	When not enough transactions were present in memory pool.
      */
     double feePerKbOrPriorityRequiredForNextFewBlocks(bool fFeePerKb);
+
+    // throw away transactions until we have a reasonably-sized mempool
+    // Must hold lock on cs
+    void LimitSize();
 
     unsigned long size()
     {
