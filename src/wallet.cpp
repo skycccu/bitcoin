@@ -1174,7 +1174,9 @@ bool CWallet::CreateTransaction(const vector<pair<CScript, int64> >& vecSend, CW
                 // Choose coins to use
                 set<pair<const CWalletTx*,unsigned int> > setCoins;
                 int64 nValueIn = 0;
-                if (!SelectCoins(nTotalValue, setCoins, nValueIn))
+//XXX: Note that we create highest prio tx, and then pay fee if required (do we?)
+//XXX: Might be more optimal to waste low-prio inputs if we are just going to pay a fee anyway
+                if (!SelectCoins(nTotalValue, setCoins, nValueIn))//TODO look into SelectCoins algo
                     return false;
                 BOOST_FOREACH(PAIRTYPE(const CWalletTx*, unsigned int) pcoin, setCoins)
                 {
