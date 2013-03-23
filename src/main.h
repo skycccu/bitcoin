@@ -2084,7 +2084,7 @@ private:
     // This is to prevent relaying transactions which are really spammy.
     // Set after first call to LimitSize(), so we probably want to make sure to
     // fill up our mempool as soon as possible to avoid relaying crap right after
-    // start (mempool p2p command).
+    // start (mempool p2p command). TODO call mempool at startup
     double dMinPriorityForAcceptance;
     double dMinFeePerKbForAcceptance;
 
