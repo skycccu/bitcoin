@@ -758,7 +758,8 @@ bool CTxMemPool::accept(CValidationState &state, CTransaction &tx, bool fEnforce
             printf("CTxMemPool::accept() : replacing tx %s with new version\n", ptxOld->GetHash().ToString().c_str());
             remove(*ptxOld);
         }
-        addUnchecked(hash, tx, fEnforceMemoryLimits ? dPriority : numeric_limits<double>::infinity(), nFees, ::GetSerializeSize(tx, SER_NETWORK, PROTOCOL_VERSION), nHeight);
+        if (!addUnchecked(hash, tx, fEnforceMemoryLimits ? dPriority : numeric_limits<double>::infinity(), nFees, ::GetSerializeSize(tx, SER_NETWORK, PROTOCOL_VERSION), nHeight))
+            return error("CTxMemPool::accept() : Transaction rejected by mempool size limits");
     }
 
     ///// are we sure this is ok when loading transactions or restoring block txes
@@ -785,24 +786,45 @@ bool CTransaction::AcceptToMemoryPool(CValidationState &state, bool fEnforceMemo
 
 bool CTxMemPool::addUnchecked(const uint256& hash, CTransaction &tx, double dPriority, int64 nTxFee, unsigned int nTxSize, int nHeight)
 {
-    // Add to memory pool without checking anything.  Don't call this directly,
+    // Add to memory pool without checking the tx.  Don't call this directly,
     // call CTxMemPool::accept to properly check the transaction first.
-    {
-        double dFeePerKb = double(nTxFee)/(double(nTxSize)/1000.0);
-        mapTx[hash] = make_pair(tx, make_tuple(nHeight, dPriority, dFeePerKb));
-        for (unsigned int i = 0; i < tx.vin.size(); i++)
-            mapNextTx[tx.vin[i].prevout] = CInPoint(&mapTx[hash].first, i);
+    // This will, however, check the tx against prio/fee limits and limit mempool size.
+    double dFeePerKb = double(nTxFee)/(double(nTxSize)/1000.0);
 
-        CTransaction* ptx = &(mapTx[hash].first);
-        mapTxByPriorityWhenAdded.insert(make_pair(dPriority, make_pair(ptx, nTxSize)));
-        mapTxByFeePerKb.insert(make_pair(dFeePerKb, make_pair(ptx, nTxSize)));
-        mapTxByHeightWhenAdded.insert(make_pair(nHeight, ptx));
+    // We exponentially decay the acceptance minimums very slowly so that
+    // long-running nodes don't act on what the acceptance minimums were
+    // months ago.
+    // We use a half-life of ~3 hours as we want to be very careful to
+    // not relay transactions which are spammy.
+    // In 1 hour (in which time we should have received many new txn),
+    // we still have minimums ~80% of the originals as set by LimitSize(),
+    // which is a reasonable minimum for relay.
+    static int64 nLastTime;
+    int64 nNow = GetTime();
+    dMinFeePerKbForAcceptance *= pow(1.0 - 1.0/16000.0, double(nNow - nLastTime));
+    dMinPriorityForAcceptance *= pow(1.0 - 1.0/16000.0, double(nNow - nLastTime));
 
-        nMemPoolSize += nTxSize;
-        nTransactionsUpdated++;
-    }
+    if (dFeePerKb < dMinFeePerKbForAcceptance && dPriority < dMinPriorityForAcceptance)
+        return false;
+
+    mapTx[hash] = make_pair(tx, make_tuple(nHeight, dPriority, dFeePerKb));
+    for (unsigned int i = 0; i < tx.vin.size(); i++)
+        mapNextTx[tx.vin[i].prevout] = CInPoint(&mapTx[hash].first, i);
+
+    CTransaction* ptx = &(mapTx[hash].first);
+    mapTxByPriorityWhenAdded.insert(make_pair(dPriority, make_pair(ptx, nTxSize)));
+    mapTxByFeePerKb.insert(make_pair(dFeePerKb, make_pair(ptx, nTxSize)));
+    mapTxByHeightWhenAdded.insert(make_pair(nHeight, ptx));
+
+    nMemPoolSize += nTxSize;
+    nTransactionsUpdated++;
+
     if (nMemPoolSize > GetArg("-maxmempoolsize", MAX_BLOCK_SIZE*10))
+    {
         LimitSize();
+        if (!mapTx.count(hash))
+            return false;
+    }
     return true;
 }
 
@@ -924,7 +946,10 @@ void CTxMemPool::LimitSize()
         sTxToRemove.erase(it.second.first);
         nSizeRemoved += it.second.second;
         if (nSizeRemoved > GetArg("-mempoolsize", MAX_BLOCK_SIZE*9)*7/9)
+        {
+            dMinFeePerKbForAcceptance = it.first;
             break;
+        }
     }
     nSizeRemoved = 0;
     BOOST_REVERSE_FOREACH(map_type::value_type it, mapTxByPriorityWhenAdded)
@@ -932,7 +957,10 @@ void CTxMemPool::LimitSize()
         sTxToRemove.erase(it.second.first);
         nSizeRemoved += it.second.second;
         if (nSizeRemoved > GetArg("-mempoolsize", MAX_BLOCK_SIZE*9)*2/9)
+        {
+            dMinPriorityForAcceptance = it.first;
             break;
+        }
     }
 
     BOOST_FOREACH(CTransaction* tx, sTxToRemove)

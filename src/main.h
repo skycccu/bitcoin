@@ -2078,7 +2078,15 @@ private:
     std::multimap<double, std::pair<CTransaction*, int> > mapTxByPriorityWhenAdded;
     std::multimap<double, std::pair<CTransaction*, int> > mapTxByFeePerKb;
     std::multimap<int, CTransaction*> mapTxByHeightWhenAdded;
+    // Total mempool transaction size
     unsigned int nMemPoolSize;
+    // If a transaction has fee/prio lower than this, it is immediately rejected.
+    // This is to prevent relaying transactions which are really spammy.
+    // Set after first call to LimitSize(), so we probably want to make sure to
+    // fill up our mempool as soon as possible to avoid relaying crap right after
+    // start (mempool p2p command).
+    double dMinPriorityForAcceptance;
+    double dMinFeePerKbForAcceptance;
 
 public:
     mutable CCriticalSection cs;
