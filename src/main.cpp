@@ -1113,6 +1113,28 @@ public:
         return tx;
     }
 
+    bool HasNextTx() { return !vecPriority.empty(); }
+
+    void ProcessDependants(const uint256& hash)
+    {
+        // Add transactions that depend on this one to the priority queue
+        if (mapDependers.count(hash))
+        {
+            BOOST_FOREACH(COrphan* porphan, mapDependers[hash])
+            {
+                if (!porphan->setDependsOn.empty())
+                {
+                    porphan->setDependsOn.erase(hash);
+                    if (porphan->setDependsOn.empty())
+                    {
+                        vecPriority.push_back(TxPriority(porphan->dPriority, porphan->dFeePerKb, porphan->nHeight, porphan->ptx));
+                        std::push_heap(vecPriority.begin(), vecPriority.end(), comparer);
+                    }
+                }
+            }
+        }
+    }
+
     TransactionsForBlock() : comparer(true) {}
 };
 
@@ -1129,7 +1151,7 @@ double CTxMemPool::feePerKbOrPriorityRequiredForNextFewBlocks(bool fFeePerKb)
     double nTotal = 0;
     unsigned int nTxCount = 0;
     // We look for the FEE_POLICY_TOP_N_TX txn with highest fee/priority in mempool
-    while (nTxCount < FEE_POLICY_TOP_N_TX && !txGroup.vecPriority.empty())
+    while (nTxCount < FEE_POLICY_TOP_N_TX && txGroup.HasNextTx())
     {
         TxPriority tx = txGroup.GetNextTx();
 
@@ -4443,7 +4465,7 @@ CBlockTemplate* CreateNewBlock(CReserveKey& reservekey)
 
         txGroup.PrepareOrder(fSortedByFee);
 
-        while (!txGroup.vecPriority.empty())
+        while (!txGroup.HasNextTx())
         {
             // Take highest priority transaction off the priority queue:
             TxPriority txp = txGroup.GetNextTx();
@@ -4513,22 +4535,7 @@ CBlockTemplate* CreateNewBlock(CReserveKey& reservekey)
                        dPriority, dFeePerKb, tx.GetHash().ToString().c_str());
             }
 
-            // Add transactions that depend on this one to the priority queue
-            if (txGroup.mapDependers.count(hash))
-            {
-                BOOST_FOREACH(COrphan* porphan, txGroup.mapDependers[hash])
-                {
-                    if (!porphan->setDependsOn.empty())
-                    {
-                        porphan->setDependsOn.erase(hash);
-                        if (porphan->setDependsOn.empty())
-                        {
-                            txGroup.vecPriority.push_back(TxPriority(porphan->dPriority, porphan->dFeePerKb, porphan->nHeight, porphan->ptx));
-                            std::push_heap(txGroup.vecPriority.begin(), txGroup.vecPriority.end(), txGroup.comparer);
-                        }
-                    }
-                }
-            }
+            txGroup.ProcessDependants(hash);
         }
 
         nLastBlockTx = nBlockTx;
