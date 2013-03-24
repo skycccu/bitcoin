@@ -1020,10 +1020,13 @@ public:
 
 class TransactionsForBlock
 {
-public:
+private:
     vector<TxPriority> vecPriority;
     list<COrphan> vOrphan;
     map<uint256, vector<COrphan*> > mapDependers;
+    TxPriorityCompare comparer;
+
+public:
     void CollectTransactionsForBlock(CCoinsViewCache& view, int nHeight)
     {
         vecPriority.reserve(mempool.mapTx.size());
@@ -1098,7 +1101,6 @@ public:
         }
     }
 
-    TxPriorityCompare comparer;
     void PrepareOrder(bool fByFee)
     {
         comparer = TxPriorityCompare(fByFee);
