@@ -1097,6 +1097,23 @@ public:
                 vecPriority.push_back(TxPriority(dPriority, dFeePerKb, get<0>((*mi).second.second), &(*mi).second.first));
         }
     }
+
+    TxPriorityCompare comparer;
+    void PrepareOrder(bool fByFee)
+    {
+        comparer = TxPriorityCompare(fByFee);
+        std::make_heap(vecPriority.begin(), vecPriority.end(), comparer);
+    }
+
+    TxPriority GetNextTx()
+    {
+        TxPriority& tx = vecPriority.front();
+        std::pop_heap(vecPriority.begin(), vecPriority.end(), comparer);
+        vecPriority.pop_back();
+        return tx;
+    }
+
+    TransactionsForBlock() : comparer(true) {}
 };
 
 double CTxMemPool::feePerKbOrPriorityRequiredForNextFewBlocks(bool fFeePerKb)
@@ -1107,18 +1124,14 @@ double CTxMemPool::feePerKbOrPriorityRequiredForNextFewBlocks(bool fFeePerKb)
 
     // Collect the set of mineable transactions
     txGroup.CollectTransactionsForBlock(view, nBestHeight + 1);
-
-    TxPriorityCompare comparer(fFeePerKb);
-    std::make_heap(txGroup.vecPriority.begin(), txGroup.vecPriority.end(), comparer);
+    txGroup.PrepareOrder(fFeePerKb);
 
     double nTotal = 0;
     unsigned int nTxCount = 0;
     // We look for the FEE_POLICY_TOP_N_TX txn with highest fee/priority in mempool
     while (nTxCount < FEE_POLICY_TOP_N_TX && !txGroup.vecPriority.empty())
     {
-        TxPriority& tx = txGroup.vecPriority.front();
-        std::pop_heap(txGroup.vecPriority.begin(), txGroup.vecPriority.end(), comparer);
-        txGroup.vecPriority.pop_back();
+        TxPriority tx = txGroup.GetNextTx();
 
         // Must have been in mempool for at least FEE_POLICY_DETERMINATION_BLOCKS blocks
         if (tx.get<2>() < nBestHeight - FEE_POLICY_DETERMINATION_BLOCKS)
@@ -4428,18 +4441,15 @@ CBlockTemplate* CreateNewBlock(CReserveKey& reservekey)
         int nBlockSigOps = 100;
         bool fSortedByFee = (nBlockPrioritySize <= 0);
 
-        TxPriorityCompare comparer(fSortedByFee);
-        std::make_heap(txGroup.vecPriority.begin(), txGroup.vecPriority.end(), comparer);
+        txGroup.PrepareOrder(fSortedByFee);
 
         while (!txGroup.vecPriority.empty())
         {
             // Take highest priority transaction off the priority queue:
-            double dPriority = txGroup.vecPriority.front().get<0>();
-            double dFeePerKb = txGroup.vecPriority.front().get<1>();
-            CTransaction& tx = *(txGroup.vecPriority.front().get<3>());
-
-            std::pop_heap(txGroup.vecPriority.begin(), txGroup.vecPriority.end(), comparer);
-            txGroup.vecPriority.pop_back();
+            TxPriority txp = txGroup.GetNextTx();
+            double dPriority = get<0>(txp);
+            double dFeePerKb = get<1>(txp);
+            CTransaction& tx = *get<3>(txp);
 
             // second layer cached modifications just for this transaction
             CCoinsViewCache viewTemp(view, true);
@@ -4464,8 +4474,7 @@ CBlockTemplate* CreateNewBlock(CReserveKey& reservekey)
                 ((nBlockSize + nTxSize >= nBlockPrioritySize) || (dPriority < COIN * 144 / 250)))
             {
                 fSortedByFee = true;
-                comparer = TxPriorityCompare(fSortedByFee);
-                std::make_heap(txGroup.vecPriority.begin(), txGroup.vecPriority.end(), comparer);
+                txGroup.PrepareOrder(fSortedByFee);
             }
 
             if (!tx.HaveInputs(viewTemp))
@@ -4515,7 +4524,7 @@ CBlockTemplate* CreateNewBlock(CReserveKey& reservekey)
                         if (porphan->setDependsOn.empty())
                         {
                             txGroup.vecPriority.push_back(TxPriority(porphan->dPriority, porphan->dFeePerKb, porphan->nHeight, porphan->ptx));
-                            std::push_heap(txGroup.vecPriority.begin(), txGroup.vecPriority.end(), comparer);
+                            std::push_heap(txGroup.vecPriority.begin(), txGroup.vecPriority.end(), txGroup.comparer);
                         }
                     }
                 }
