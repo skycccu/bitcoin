@@ -994,8 +994,8 @@ public:
 };
 
 // We want to sort transactions by priority and fee, so:
-//               priority, feePerKb, height
-typedef boost::tuple<double, double, int, CTransaction*> TxPriority;
+//               priority, feePerKb, height            , parent (Disjoint Set, actually a TxPriority*)
+typedef boost::tuple<double, double, int, CTransaction*, void*> TxPriority;
 class TxPriorityCompare
 {
     bool byFee;
@@ -1025,6 +1025,28 @@ private:
     list<COrphan> vOrphan;
     map<uint256, vector<COrphan*> > mapDependers;
     TxPriorityCompare comparer;
+
+    TxPriority* TxPriorityFind(TxPriority *txprio)
+    {
+        if (get<4>(*txprio) != txprio)
+            get<4>(*txprio) = TxPriorityFind((TxPriority*)get<4>(*txprio));
+        return (TxPriority*)get<4>(*txprio);
+    }
+
+    void TxPriorityUnion(TxPriority *a, TxPriority *b)
+    {
+        TxPriority *aRoot;
+        if (get<4>(*a))
+            aRoot = TxPriorityFind(a);
+        else
+            aRoot = a;
+        TxPriority *bRoot;
+        if (get<4>(*b))
+            bRoot = TxPriorityFind(b);
+        else
+            bRoot = b;
+        get<4>(*aRoot) = bRoot;
+    }
 
 public:
     void CollectTransactionsForBlock(CCoinsViewCache& view, int nHeight)
@@ -1080,7 +1102,11 @@ public:
 
                 mapPrevouts[txin.prevout] = make_pair(nValueIn, coins.nHeight);
             }
-            if (fMissingInputs) continue;
+            if (fMissingInputs)
+            {
+                
+                continue;
+            }
 
             double dPriority = tx.GetPriority(mapPrevouts, nHeight);
 
