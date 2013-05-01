@@ -1182,6 +1182,7 @@ double CTxMemPool::feePerKbOrPriorityRequiredForNextFewBlocks(bool fFeePerKb)
     while (nTxCount < FEE_POLICY_TOP_N_TX && txGroup.HasNextTx())
     {
         TxPriority tx = txGroup.GetNextTx();
+        txGroup.ProcessDependants(*get<3>(tx));
 
         // Must have been in mempool for at least FEE_POLICY_DETERMINATION_BLOCKS blocks
         if (tx.get<2>() < nBestHeight - FEE_POLICY_DETERMINATION_BLOCKS)
