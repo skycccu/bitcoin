@@ -604,7 +604,9 @@ public:
      */
     int64 GetValueIn(CCoinsViewCache& mapInputs) const;
 
-    /** Gets the priority of this transaction at height nHeight
+    /** Gets the priority of this transaction at height nHeight.
+        Note that this MUST always be some value / tx size, as
+        several algorithms depend on this property.
 
         @param[in] mPrevouts	A map of COutPoint->pair<value, height> which contains all outputs which are spent by this transaction
         @param[in] dPriority	The height
@@ -2090,8 +2092,9 @@ private:
 
 public:
     mutable CCriticalSection cs;
-    //        hash                                     height, priority, feePerKb
-    std::map<uint256, std::pair<CTransaction, boost::tuple<int, double, double> > > mapTx;
+    //                hash                                     height, priority, feePerKb
+    typedef std::map<uint256, std::pair<CTransaction, boost::tuple<int, double, double> > > MapTxType;
+    MapTxType mapTx;
     std::map<COutPoint, CInPoint> mapNextTx;
 
     bool accept(CValidationState &state, CTransaction &tx, bool fEnforceMemoryLimits, bool* pfMissingInputs, int nHeight);

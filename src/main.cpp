@@ -967,53 +967,38 @@ void CTxMemPool::LimitSize()
         remove(*tx, true);
 }
 
-// Some explaining would be appreciated
-class COrphan
-{
-public:
-    CTransaction* ptx;
-    set<uint256> setDependsOn;
-    int nHeight;
-    double dPriority;
-    double dFeePerKb;
-
-    COrphan(CTransaction* ptxIn, int nHeightIn)
-    {
-        ptx = ptxIn;
-        nHeight = nHeightIn;
-        dPriority = dFeePerKb = 0;
-    }
-
-    void print() const
-    {
-        printf("COrphan(hash=%s, dPriority=%.1f, dFeePerKb=%.1f)\n",
-               ptx->GetHash().ToString().c_str(), dPriority, dFeePerKb);
-        BOOST_FOREACH(uint256 hash, setDependsOn)
-            printf("   setDependsOn %s\n", hash.ToString().c_str());
-    }
-};
-
 // We want to sort transactions by priority and fee, so:
-//               priority, feePerKb, height            , parent (Disjoint Set, actually a TxPriority*)
-typedef boost::tuple<double, double, int, CTransaction*, void*> TxPriority;
-class TxPriorityCompare
+//               priority, feePerKb, height, size                    , parent (Disjoint Set, actually a TxPriority*)
+typedef boost::tuple<double, double, int, unsigned int, CTransaction*, void*> TxPriority;
+
+class TransactionGroup
+{
+    map<double, list<TxPriority*> > txnByPriority;
+    map<double, list<TxPriority*> > txnByFeePerKb;
+};
+class TxGroupCompare
 {
     bool byFee;
 public:
-    TxPriorityCompare(bool _byFee) : byFee(_byFee) { }
-    bool operator()(const TxPriority& a, const TxPriority& b)
+    TxGroupCompare(bool _byFee) : byFee(_byFee) { }
+    bool operator()(const TransactionGroup& a, const TransactionGroup& b)
     {
+//TODO begin() or last()?
+        double aPrio = a.txnByPriority.begin()->first;
+        double aFee = a.txnByFeePerKb.begin()->first;
+        double bPrio = b.txnByPriority.begin()->first;
+        double bFee = b.txnByFeePerKb.begin()->first;
         if (byFee)
         {
-            if (a.get<1>() == b.get<1>())
-                return a.get<0>() < b.get<0>();
-            return a.get<1>() < b.get<1>();
+            if (aFee == bFee)
+                return aPrio < bPrio;
+            return aFee < bFee;
         }
         else
         {
-            if (a.get<0>() == b.get<0>())
-                return a.get<1>() < b.get<1>();
-            return a.get<0>() < b.get<0>();
+            if (aPrio == bPrio)
+                return aFee < bFee;
+            return aPrio < bPrio;
         }
     }
 };
@@ -1021,44 +1006,70 @@ public:
 class TransactionsForBlock
 {
 private:
-    vector<TxPriority> vecPriority;
-    list<COrphan> vOrphan;
-    map<uint256, vector<COrphan*> > mapDependers;
+    list<TxPriority> lPriority;
+    vector<TransactionGroup> vecTxQueue;
     TxPriorityCompare comparer;
 
     TxPriority* TxPriorityFind(TxPriority *txprio)
     {
-        if (get<4>(*txprio) != txprio)
-            get<4>(*txprio) = TxPriorityFind((TxPriority*)get<4>(*txprio));
-        return (TxPriority*)get<4>(*txprio);
+        if (get<5>(*txprio) != txprio)
+            get<5>(*txprio) = TxPriorityFind((TxPriority*)get<5>(*txprio));
+        return (TxPriority*)get<5>(*txprio);
     }
 
+    // For performance, always call with a's root being itself
     void TxPriorityUnion(TxPriority *a, TxPriority *b)
     {
         TxPriority *aRoot;
-        if (get<4>(*a))
+        if (get<5>(*a))
             aRoot = TxPriorityFind(a);
         else
             aRoot = a;
         TxPriority *bRoot;
-        if (get<4>(*b))
+        if (get<5>(*b))
             bRoot = TxPriorityFind(b);
         else
             bRoot = b;
-        get<4>(*aRoot) = bRoot;
+        get<5>(*aRoot) = bRoot;
     }
 
 public:
     void CollectTransactionsForBlock(CCoinsViewCache& view, int nHeight)
     {
-        vecPriority.reserve(mempool.mapTx.size());
+        // Runtime notes:
+        // We cannot ever do better than worst-case O(N*(N + avg in-chain inputs))
+        // As we must, at a minimum, do something with each input of each transaction
+        // and if someone is being truly evil they can create a transaction that depends
+        // on O(N) transactions which are also in mempool.
+        // The algorithm implemented here runs in O(N*(N*lg(N) + avg in-chain inputs))
+        // For clarity, the in-chain inputs processing time is ignored and all run-time
+        // comments are worst-case unless otherwise stated mempool.
+        map<uint256, TxPriority*> mapHashToTxPrio;
+
+        // We have to first create all the TxPriority's and add them to the map so that we can Union them in the next loop
+        // Loop total: O(lg(N))
         for (map<uint256, pair<CTransaction, tuple<int, double, double> > >::iterator mi = mempool.mapTx.begin(); mi != mempool.mapTx.end(); ++mi)
-        {
+        { // O(N)
+            if (!(*mi).second.first.IsFinal() || (*mi).second.first.IsCoinBase())
+                continue;
+
+            unsigned int nTxSize = ::GetSerializeSize((*mi).second.first, SER_NETWORK, PROTOCOL_VERSION);
+            // Use lPriority to manage deletion
+            lPriority.push_back(TxPriority(-1, -1, get<0>((*mi).second.second), nTxSize, &(*mi).second.first));
+            mapHashToTxPrio[mi->first] = &lPriority.back(); // O(lg(N))
+        }
+
+        // Check that dependants exist, are spendable, etc
+        // Union all the transactions which are connected
+        // Loop total: O(N^2*lg(N))
+        for (map<uint256, pair<CTransaction, tuple<int, double, double> > >::iterator mi = mempool.mapTx.begin(); mi != mempool.mapTx.end(); ++mi)
+        { // O(N)
             CTransaction& tx = (*mi).second.first;
             if (tx.IsCoinBase() || !tx.IsFinal())
                 continue;
 
-            COrphan* porphan = NULL;
+            TxPriority *prio = mapHashToTxPrio[mi->first];
+
             int64 nTotalIn = 0;
             bool fMissingInputs = false;
             map<COutPoint, pair<int64, int> > mapPrevouts;
@@ -1067,33 +1078,31 @@ public:
                 // Read prev transaction
                 CCoins coins;
                 if (!view.GetCoins(txin.prevout.hash, coins))
-                {
+                { // O(N) worst, O(1) in an average mempool
+                    mempool.MapTxType::iterator itPrevout = mempool.mapTx.find(txin.prevout.hash); // O(lg(N))
                     // This should never happen; all transactions in the memory
                     // pool should connect to either transactions in the chain
                     // or other transactions in the memory pool.
-                    if (!mempool.mapTx.count(txin.prevout.hash))
+                    if (itPrevout == mempool.mapTx.end())
                     {
                         printf("ERROR: mempool transaction missing input\n");
                         if (fDebug) assert("mempool transaction missing input" == 0);
                         fMissingInputs = true;
-                        if (porphan)
-                            vOrphan.pop_back();
                         break;
                     }
 
-                    // Has to wait for dependencies
-                    if (!porphan)
+                    CTransaction& prevout = itPrevout->second.first;
+                    if (!prevout.IsFinal() || prevout.IsCoinBase())
                     {
-                        // Use list for automatic deletion
-                        vOrphan.push_back(COrphan(&tx, nHeight));
-                        porphan = &vOrphan.back();
+                        fMissingInputs = true;
+                        break;
                     }
-                    mapDependers[txin.prevout.hash].push_back(porphan);
-                    porphan->setDependsOn.insert(txin.prevout.hash);
 
-                    int64 nValueIn = mempool.mapTx[txin.prevout.hash].first.vout[txin.prevout.n].nValue;
+                    TxPriorityUnion(prio, mapHashToTxPrio[txin.prevout.hash]); // TODO: Currently not O(1), but should be
+
+                    int64 nValueIn = prevout.vout[txin.prevout.n].nValue;
                     nTotalIn += nValueIn;
-                    mapPrevouts[txin.prevout] = make_pair(nValueIn, nHeight);
+                    mapPrevouts[txin.prevout] = make_pair(nValueIn, nHeight); // O(lg(N)) worst
                     continue;
                 }
 
@@ -1103,27 +1112,39 @@ public:
                 mapPrevouts[txin.prevout] = make_pair(nValueIn, coins.nHeight);
             }
             if (fMissingInputs)
-            {
-                
                 continue;
-            }
 
-            double dPriority = tx.GetPriority(mapPrevouts, nHeight);
+            double dPriority = tx.GetPriority(mapPrevouts, nHeight); // O(N)
 
-            unsigned int nTxSize = ::GetSerializeSize(tx, SER_NETWORK, PROTOCOL_VERSION);
+            unsigned int nTxSize = get<3>(*prio);
 
             // This is a more accurate fee-per-kilobyte than is used by the client code, because the
             // client code rounds up the size to the nearest 1K. That's good, because it gives an
             // incentive to create smaller transactions.
             double dFeePerKb =  double(nTotalIn-tx.GetValueOut()) / (double(nTxSize)/1000.0);
 
-            if (porphan)
-            {
-                porphan->dPriority = dPriority;
-                porphan->dFeePerKb = dFeePerKb;
-            }
-            else
-                vecPriority.push_back(TxPriority(dPriority, dFeePerKb, get<0>((*mi).second.second), &(*mi).second.first));
+            get<0>(prio) = dPriority;
+            get<1>(prio) = dFeePerKb;
+        }
+
+        map<TxPriority*, TransactionGroup> mapTxGroups;
+        // Create TransactionGroup objects per set
+        for (map<uint256, pair<CTransaction, tuple<int, double, double> > >::iterator mi = mempool.mapTx.begin(); mi != mempool.mapTx.end(); ++mi)
+        { // O(N)
+            CTransaction& tx = (*mi).second.first;
+            if (tx.IsCoinBase() || !tx.IsFinal())
+                continue;
+
+            TxPriority *txPrio = mapHashToTxPrio[txin.prevout.hash]; // O(lg(N))
+            if (get<0>(txPrio) == -1) // fMissingInputs
+                continue;
+
+            //TODO: process recursively all deps of this txn
+        }
+
+        for (map<TxPriority*, TransactionGroup>::iterator mi = mapTxGroups.begin(); mi != mapTxGroups.end(); ++mi)
+        {
+            mi->second
         }
     }
 
@@ -1133,16 +1154,18 @@ public:
         std::make_heap(vecPriority.begin(), vecPriority.end(), comparer);
     }
 
-    TxPriority GetNextTx()
+    TxPriority, bool GetNextTx()
     {
-        TxPriority& tx = vecPriority.front();
+        TxPriority tx = vecPriority.front();
         std::pop_heap(vecPriority.begin(), vecPriority.end(), comparer);
         vecPriority.pop_back();
-        return tx;
+        return tx, lastInGroup;
     }
 
     bool HasNextTx() { return !vecPriority.empty(); }
 
+    // Called with hash is being used in the new block
+    // as GetNextTx() may be rejected for other reasons.
     void ProcessDependants(const uint256& hash)
     {
         // Add transactions that depend on this one to the priority queue
@@ -1188,7 +1211,7 @@ double CTxMemPool::feePerKbOrPriorityRequiredForNextFewBlocks(bool fFeePerKb)
         {
             nTotal += fFeePerKb ? tx.get<1>() : tx.get<0>();
             nTxCount++;
-            txGroup.ProcessDependants(*get<3>(tx));
+            txGroup.ProcessDependants(get<4>(tx)->GetHash());
         }
     }
 
@@ -4497,10 +4520,11 @@ CBlockTemplate* CreateNewBlock(CReserveKey& reservekey)
         while (!txGroup.HasNextTx())
         {
             // Take highest priority transaction off the priority queue:
-            TxPriority txp = txGroup.GetNextTx();
+// TODO: reinvent C++ syntax?
+            TxPriority txp, bool fIsLastInGroup = txGroup.GetNextTx();
             double dPriority = get<0>(txp);
             double dFeePerKb = get<1>(txp);
-            CTransaction& tx = *get<3>(txp);
+            CTransaction& tx = *get<4>(txp);
 
             // second layer cached modifications just for this transaction
             CCoinsViewCache viewTemp(view, true);
@@ -4516,13 +4540,14 @@ CBlockTemplate* CreateNewBlock(CReserveKey& reservekey)
                 continue;
 
             // Skip free transactions if we're past the minimum block size:
-            if (fSortedByFee && (dFeePerKb < nMinTxFee) && (nBlockSize + nTxSize >= nBlockMinSize))
+            if (fSortedByFee && fIsLastInGroup && (dFeePerKb < nMinTxFee) && (nBlockSize + nTxSize >= nBlockMinSize))
                 continue;
 
             // Prioritize by fee once past the priority size or we run out of high-priority
             // transactions:
             if (!fSortedByFee &&
-                ((nBlockSize + nTxSize >= nBlockPrioritySize) || (dPriority < COIN * 144 / 250)))
+                ((nBlockSize + nTxSize >= nBlockPrioritySize) ||
+                 (dPriority < COIN * 144 / 250 && fIsLastInGroup)))
             {
                 fSortedByFee = true;
                 txGroup.PrepareOrder(fSortedByFee);
