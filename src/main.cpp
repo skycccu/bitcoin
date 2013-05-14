@@ -651,10 +651,13 @@ void CTxMemPool::pruneSpent(const uint256 &hashTx, CCoins &coins)
 }
 
 bool CTxMemPool::accept(CValidationState &state, CTransaction &tx, bool fCheckInputs, bool fLimitFree,
-                        bool* pfMissingInputs)
+                        bool* pfMissingInputs, bool* pfIsFirstDoubleSpend)
 {
     if (pfMissingInputs)
         *pfMissingInputs = false;
+
+    if (pfIsFirstDoubleSpend)
+        *pfIsFirstDoubleSpend = false;
 
     if (!tx.CheckTransaction(state))
         return error("CTxMemPool::accept() : CheckTransaction failed");
@@ -679,6 +682,12 @@ bool CTxMemPool::accept(CValidationState &state, CTransaction &tx, bool fCheckIn
             return false;
     }
 
+    // In order to relay the first double spend we see for any given output,
+    // we ignore conflicts for said double spend and just add its CInPoint to
+    // this list.  We then go through all the regular checks (including
+    // IsStandard) and set the double spend seen flags at the end.
+    std::list<CInPoint*> lDoubleSpendInPoints;
+
     // Check for conflicts with in-memory transactions
     CTransaction* ptxOld = NULL;
     for (unsigned int i = 0; i < tx.vin.size(); i++)
@@ -686,6 +695,14 @@ bool CTxMemPool::accept(CValidationState &state, CTransaction &tx, bool fCheckIn
         COutPoint outpoint = tx.vin[i].prevout;
         if (mapNextTx.count(outpoint))
         {
+            // Check if we are seeing our first double spend
+            // ...but only if the caller is actually going to do something with it
+            if (pfIsFirstDoubleSpend && !mapNextTx[outpoint].fSeenDoubleSpend)
+            {
+                lDoubleSpendInPoints.push_back(&(mapNextTx[outpoint]));
+                continue;
+            }
+
             // Disable replacement feature for now
             return false;
 
@@ -728,6 +745,17 @@ bool CTxMemPool::accept(CValidationState &state, CTransaction &tx, bool fCheckIn
             if (!view.HaveCoins(txin.prevout.hash)) {
                 if (pfMissingInputs)
                     *pfMissingInputs = true;
+                // Note that we let missing inputs override our desire to relay first double spends here.
+                // This may happen often if this node was recently restarted and this transaction either
+                // depends on another unconfirmed transaction or one in a block which we do not yet have.
+                // The first case is likely fairly common, however wallets which have a memory pool attached
+                // (ie are not SPV nodes) should alert the user if a transaction depends on another loose
+                // transaction (as it will likely take even longer to confirm than usual).  SPV nodes are
+                // not able to reliably find double spends if their transaction depends on unconfirmed
+                // transactions anyway, so it shouldn't matter for them.
+                // The second case (missing blocks) is hopefully very uncommon, and when it does happen
+                // we are likely missing many relayable transactions anyway, so if a node is depending on
+                // nodes that are missing blocks for transaction relay, we have bigger problems.
                 return false;
             }
         }
@@ -792,6 +820,15 @@ bool CTxMemPool::accept(CValidationState &state, CTransaction &tx, bool fCheckIn
         }
     }
 
+    // If we are a double spend, return here before actually adding the transaction
+    if (pfIsFirstDoubleSpend && !lDoubleSpendInPoints.empty())
+    {
+        BOOST_FOREACH(CInPoint* in, lDoubleSpendInPoints)
+            in->fSeenDoubleSpend = true;
+        *pfIsFirstDoubleSpend = true;
+        return false;
+    }
+
     // Store transaction in memory
     {
         LOCK(cs);
@@ -815,10 +852,10 @@ bool CTxMemPool::accept(CValidationState &state, CTransaction &tx, bool fCheckIn
     return true;
 }
 
-bool CTransaction::AcceptToMemoryPool(CValidationState &state, bool fCheckInputs, bool fLimitFree, bool* pfMissingInputs)
+bool CTransaction::AcceptToMemoryPool(CValidationState &state, bool fCheckInputs, bool fLimitFree, bool* pfMissingInputs, bool* pfIsFirstDoubleSpend)
 {
     try {
-        return mempool.accept(state, *this, fCheckInputs, fLimitFree, pfMissingInputs);
+        return mempool.accept(state, *this, fCheckInputs, fLimitFree, pfMissingInputs, pfIsFirstDoubleSpend);
     } catch(std::runtime_error &e) {
         return state.Abort(_("System error: ") + e.what());
     }
@@ -3512,8 +3549,9 @@ bool static ProcessMessage(CNode* pfrom, string strCommand, CDataStream& vRecv)
         pfrom->AddInventoryKnown(inv);
 
         bool fMissingInputs = false;
+        bool fIsFirstDoubleSpend = false;
         CValidationState state;
-        if (tx.AcceptToMemoryPool(state, true, true, &fMissingInputs))
+        if (tx.AcceptToMemoryPool(state, true, true, &fMissingInputs, &fIsFirstDoubleSpend))
         {
             RelayTransaction(tx, inv.hash, vMsg);
             mapAlreadyAskedFor.erase(inv);
@@ -3565,6 +3603,9 @@ bool static ProcessMessage(CNode* pfrom, string strCommand, CDataStream& vRecv)
             if (nEvicted > 0)
                 printf("mapOrphan overflow, removed %u tx\n", nEvicted);
         }
+        else if (fIsFirstDoubleSpend)
+            RelayTransaction(tx, inv.hash, vMsg);
+
         int nDoS;
         if (state.IsInvalid(nDoS))
             pfrom->Misbehaving(nDoS);

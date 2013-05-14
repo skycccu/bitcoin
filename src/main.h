@@ -247,17 +247,18 @@ struct CDiskTxPos : public CDiskBlockPos
 };
 
 
-/** An inpoint - a combination of a transaction and an index n into its vin */
+/** An inpoint - a combination of a transaction, an index n into its vin, and a flag if double spend has been seen */
 class CInPoint
 {
 public:
     CTransaction* ptx;
     unsigned int n;
+    bool fSeenDoubleSpend;
 
     CInPoint() { SetNull(); }
-    CInPoint(CTransaction* ptxIn, unsigned int nIn) { ptx = ptxIn; n = nIn; }
-    void SetNull() { ptx = NULL; n = (unsigned int) -1; }
-    bool IsNull() const { return (ptx == NULL && n == (unsigned int) -1); }
+    CInPoint(CTransaction* ptxIn, unsigned int nIn) { ptx = ptxIn; n = nIn; fSeenDoubleSpend = false; }
+    void SetNull() { ptx = NULL; n = (unsigned int) -1; fSeenDoubleSpend = false; }
+    bool IsNull() const { return (ptx == NULL && n == (unsigned int) -1 && !fSeenDoubleSpend); }
 };
 
 
@@ -665,7 +666,7 @@ public:
     bool CheckTransaction(CValidationState &state) const;
 
     // Try to accept this transaction into the memory pool
-    bool AcceptToMemoryPool(CValidationState &state, bool fCheckInputs=true, bool fLimitFree = true, bool* pfMissingInputs=NULL);
+    bool AcceptToMemoryPool(CValidationState &state, bool fCheckInputs=true, bool fLimitFree = true, bool* pfMissingInputs=NULL, bool* pfIsFirstDoubleSpend=NULL);
 
 protected:
     static const CTxOut &GetOutputFor(const CTxIn& input, CCoinsViewCache& mapInputs);
@@ -2066,7 +2067,7 @@ public:
     std::map<uint256, CTransaction> mapTx;
     std::map<COutPoint, CInPoint> mapNextTx;
 
-    bool accept(CValidationState &state, CTransaction &tx, bool fCheckInputs, bool fLimitFree, bool* pfMissingInputs);
+    bool accept(CValidationState &state, CTransaction &tx, bool fCheckInputs, bool fLimitFree, bool* pfMissingInputs, bool* pfIsFirstDoubleSpend);
     bool addUnchecked(const uint256& hash, CTransaction &tx);
     bool remove(const CTransaction &tx, bool fRecursive = false);
     bool removeConflicts(const CTransaction &tx);
