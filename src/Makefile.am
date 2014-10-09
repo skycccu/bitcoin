@@ -21,7 +21,7 @@ $(LIBLEVELDB) $(LIBMEMENV):
 endif
 
 BITCOIN_CONFIG_INCLUDES=-I$(builddir)/config
-BITCOIN_INCLUDES=-I$(builddir) -I$(builddir)/obj $(BOOST_CPPFLAGS) $(LEVELDB_CPPFLAGS) $(CRYPTO_CFLAGS) $(SSL_CFLAGS)
+BITCOIN_INCLUDES=-I$(builddir) -I$(builddir)/include -I$(builddir)/obj $(BOOST_CPPFLAGS) $(LEVELDB_CPPFLAGS) $(CRYPTO_CFLAGS) $(SSL_CFLAGS)
 
 if USE_LIBSECP256K1
 BITCOIN_INCLUDES += -I$(srcdir)/secp256k1/include
@@ -43,6 +43,10 @@ noinst_LIBRARIES = \
   libbitcoin_util.a \
   univalue/libbitcoin_univalue.a \
   crypto/libbitcoin_crypto.a
+
+lib_LTLIBRARIES = libbitcoinconsensus.la
+include_HEADERS = include/bitcoinconsensus.h
+
 if ENABLE_WALLET
 BITCOIN_INCLUDES += $(BDB_CPPFLAGS)
 noinst_LIBRARIES += libbitcoin_wallet.a
@@ -242,6 +246,60 @@ libbitcoin_util_a_SOURCES = \
   utiltime.cpp \
   version.cpp \
   $(BITCOIN_CORE_H)
+
+# bitcoinscript: shared library that includes everything
+# you need to validate the script part of consensus
+libbitcoinconsensus_la_CPPFLAGS = $(BITCOIN_INCLUDES)
+libbitcoinconsensus_la_LDFLAGS = -version-info 0:0:0
+#-export-symbols-regex '^bitcoinconsensus_'
+libbitcoinconsensus_la_LIBADD = \
+  $(SSL_LIBS) \
+  $(BOOST_LIBS) \
+  $(CRYPTO_LIBS)
+libbitcoinconsensus_la_SOURCES = \
+  univalue/univalue.cpp \
+  univalue/univalue_read.cpp \
+  univalue/univalue_write.cpp \
+  univalue/univalue_escapes.h \
+  univalue/univalue.h \
+  allocators.cpp \
+  base58.cpp \
+  chainparams.cpp \
+  coins.cpp \
+  core.cpp \
+  core_read.cpp \
+  core_write.cpp \
+  hash.cpp \
+  key.cpp \
+  keystore.cpp \
+  netbase.cpp \
+  protocol.cpp \
+  script/compressor.cpp \
+  script/interpreter.cpp \
+  script/script.cpp \
+  script/sigcache.cpp \
+  script/sign.cpp \
+  script/standard.cpp \
+  compat/glibc_sanity.cpp \
+  compat/glibcxx_sanity.cpp \
+  chainparamsbase.cpp \
+  random.cpp \
+  rpcprotocol.cpp \
+  sync.cpp \
+  uint256.cpp \
+  util.cpp \
+  utilstrencodings.cpp \
+  utilmoneystr.cpp \
+  utiltime.cpp \
+  version.cpp \
+  crypto/sha1.cpp \
+  crypto/sha2.cpp \
+  crypto/ripemd160.cpp \
+  crypto/common.h \
+  crypto/sha2.h \
+  crypto/sha1.h \
+  crypto/ripemd160.h \
+  libbitcoinconsensus.cpp
 
 if GLIBC_BACK_COMPAT
 libbitcoin_util_a_SOURCES += compat/glibc_compat.cpp
