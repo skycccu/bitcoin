@@ -178,6 +178,16 @@ CBlockTemplate* CreateNewBlock(const CScript& scriptPubKeyIn)
                 const CCoins* coins = view.AccessCoins(txin.prevout.hash);
                 assert(coins);
 
+                if (coins->IsCoinBase() && pindexPrev->nHeight + 1 - coins->nHeight < COINBASE_MATURITY)
+                {
+                    // The mempool invariant allows immature coinbase spends in mempool,
+                    // but they can only appear during a reorg, not after, so this cannot
+                    // ever actually happen.
+                    LogPrintf("ERROR: Immature coinbase spend in mempool");
+                    if (fDebug) assert("mempool transaction spending immature coinbase" == 0);
+                    throw std::runtime_error("CreateNewBlock() : Cannot create block during reorg");
+                }
+
                 CAmount nValueIn = coins->vout[txin.prevout.n].nValue;
                 nTotalIn += nValueIn;
 

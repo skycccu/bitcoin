@@ -1819,6 +1819,8 @@ void static UpdateTip(CBlockIndex *pindexNew) {
 }
 
 // Disconnect chainActive's tip.
+// Note that after this call immature coinbase spends may be present in the mempool
+// Thus, this is not sufficient to reorg to a chain of lower total work.
 bool static DisconnectTip(CValidationState &state) {
     CBlockIndex *pindexDelete = chainActive.Tip();
     assert(pindexDelete);
@@ -2054,12 +2056,10 @@ static bool ActivateBestChainStep(CValidationState &state, CBlockIndex *pindexMo
 bool ActivateBestChain(CValidationState &state, CBlock *pblock) {
     CBlockIndex *pindexNewTip = NULL;
     CBlockIndex *pindexMostWork = NULL;
-    do {
-        boost::this_thread::interruption_point();
-
-        bool fInitialDownload;
-        {
-            LOCK(cs_main);
+    bool fInitialDownload;
+    {
+        LOCK(cs_main);
+        do {
             pindexMostWork = FindMostWorkChain();
 
             // Whether we have anything to do at all.
@@ -2071,24 +2071,26 @@ bool ActivateBestChain(CValidationState &state, CBlock *pblock) {
 
             pindexNewTip = chainActive.Tip();
             fInitialDownload = IsInitialBlockDownload();
-        }
-        // When we reach this point, we switched to a new tip (stored in pindexNewTip).
+            // When we reach this point, we switched to a new tip (stored in pindexNewTip).
+        } while(pindexMostWork != chainActive.Tip());
+    }
 
-        // Notifications/callbacks that can run without cs_main
-        if (!fInitialDownload) {
-            uint256 hashNewTip = pindexNewTip->GetBlockHash();
-            // Relay inventory, but don't relay old inventory during initial block download.
-            int nBlockEstimate = Checkpoints::GetTotalBlocksEstimate();
-            {
-                LOCK(cs_vNodes);
-                BOOST_FOREACH(CNode* pnode, vNodes)
-                    if (chainActive.Height() > (pnode->nStartingHeight != -1 ? pnode->nStartingHeight - 2000 : nBlockEstimate))
-                        pnode->PushInventory(CInv(MSG_BLOCK, hashNewTip));
-            }
+    boost::this_thread::interruption_point();
 
-            uiInterface.NotifyBlockTip(hashNewTip);
+    // Notifications/callbacks that can run without cs_main
+    if (!fInitialDownload) {
+        uint256 hashNewTip = pindexNewTip->GetBlockHash();
+        // Relay inventory, but don't relay old inventory during initial block download.
+        int nBlockEstimate = Checkpoints::GetTotalBlocksEstimate();
+        {
+            LOCK(cs_vNodes);
+            BOOST_FOREACH(CNode* pnode, vNodes)
+                if (chainActive.Height() > (pnode->nStartingHeight != -1 ? pnode->nStartingHeight - 2000 : nBlockEstimate))
+                    pnode->PushInventory(CInv(MSG_BLOCK, hashNewTip));
         }
-    } while(pindexMostWork != chainActive.Tip());
+
+        uiInterface.NotifyBlockTip(hashNewTip);
+    }
 
     return true;
 }
