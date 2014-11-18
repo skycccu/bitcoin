@@ -427,7 +427,7 @@ bool CTxMemPool::addUnchecked(const uint256& hash, const CTxMemPoolEntry &entry)
 }
 
 
-void CTxMemPool::remove(const CTransaction &tx, std::list<CTransaction>& removed, bool fRecursive)
+void CTxMemPool::remove(const CTransaction &tx, bool fRecursive)
 {
     // Remove transaction from memory pool
     {
@@ -438,12 +438,11 @@ void CTxMemPool::remove(const CTransaction &tx, std::list<CTransaction>& removed
                 std::map<COutPoint, CInPoint>::iterator it = mapNextTx.find(COutPoint(hash, i));
                 if (it == mapNextTx.end())
                     continue;
-                remove(*it->second.ptx, removed, true);
+                remove(*it->second.ptx, true);
             }
         }
         if (mapTx.count(hash))
         {
-            removed.push_front(tx);
             BOOST_FOREACH(const CTxIn& txin, tx.vin)
                 mapNextTx.erase(txin.prevout);
 
@@ -473,13 +472,11 @@ void CTxMemPool::removeCoinbaseSpends(const CCoinsViewCache *pcoins, unsigned in
             }
         }
     }
-    BOOST_FOREACH(const CTransaction& tx, transactionsToRemove) {
-        list<CTransaction> removed;
-        remove(tx, removed, true);
-    }
+    BOOST_FOREACH(const CTransaction& tx, transactionsToRemove)
+        remove(tx, true);
 }
 
-void CTxMemPool::removeConflicts(const CTransaction &tx, std::list<CTransaction>& removed)
+void CTxMemPool::removeConflicts(const CTransaction &tx)
 {
     // Remove transactions which depend on inputs of tx, recursively
     list<CTransaction> result;
@@ -490,7 +487,7 @@ void CTxMemPool::removeConflicts(const CTransaction &tx, std::list<CTransaction>
             const CTransaction &txConflict = *it->second.ptx;
             if (txConflict != tx)
             {
-                remove(txConflict, removed, true);
+                remove(txConflict, true);
             }
         }
     }
@@ -499,8 +496,7 @@ void CTxMemPool::removeConflicts(const CTransaction &tx, std::list<CTransaction>
 /**
  * Called when a block is connected. Removes from mempool and updates the miner fee estimator.
  */
-void CTxMemPool::removeForBlock(const std::vector<CTransaction>& vtx, unsigned int nBlockHeight,
-                                std::list<CTransaction>& conflicts)
+void CTxMemPool::removeForBlock(const std::vector<CTransaction>& vtx, unsigned int nBlockHeight)
 {
     LOCK(cs);
     std::vector<CTxMemPoolEntry> entries;
@@ -513,9 +509,8 @@ void CTxMemPool::removeForBlock(const std::vector<CTransaction>& vtx, unsigned i
     minerPolicyEstimator->seenBlock(entries, nBlockHeight, minRelayFee);
     BOOST_FOREACH(const CTransaction& tx, vtx)
     {
-        std::list<CTransaction> dummy;
-        remove(tx, dummy, false);
-        removeConflicts(tx, conflicts);
+        remove(tx, false);
+        removeConflicts(tx);
         ClearPrioritisation(tx.GetHash());
     }
 }
