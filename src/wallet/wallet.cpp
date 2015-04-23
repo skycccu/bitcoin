@@ -1668,10 +1668,6 @@ bool CWallet::SelectCoins(const CAmount& nTargetValue, set<pair<const CWalletTx*
     vector<COutput> vCoins;
     AvailableCoins(vCoins, true, coinControl);
 
-    // create a empty set to store possible inputs
-    set<pair<const CWalletTx*,unsigned int> > setTempCoins;
-    CAmount nValueTroughInputs = 0;
-
     // coin control -> return all selected outputs (we want all selected to go into the transaction for sure)
     if (coinControl && coinControl->HasSelected())
     {
@@ -1685,51 +1681,46 @@ bool CWallet::SelectCoins(const CAmount& nTargetValue, set<pair<const CWalletTx*
         return (nValueRet >= nTargetValue);
     }
 
-    // fill up the tx with possible predefined inputs
+    // calculate value from preset inputs and store them
+    set<pair<const CWalletTx*, uint32_t> > setPresetCoins;
+    CAmount nValueFromPresetInputs = 0;
+
     BOOST_FOREACH(const CTxIn& txin, vPresetInputs)
     {
-        bool vinOk = false;
-        // search for VIN in available coins
-        for (vector<COutput>::iterator it = vCoins.begin() ; it != vCoins.end();)
+        map<uint256, CWalletTx>::const_iterator it = mapWallet.find(txin.prevout.hash);
+        if (it != mapWallet.end())
         {
-            const COutput& out = *it;
-            if (out.tx->GetHash() == txin.prevout.hash && txin.prevout.n == (uint32_t)out.i)
-            {
-                if (!out.fSpendable)
-                    continue;
-
-                nValueTroughInputs    += out.tx->vout[out.i].nValue;
-
-                // temporarily keep the coin to add them later after SelectCoinsMinConf has added some
-                setTempCoins.insert(make_pair(out.tx, out.i));
-                vinOk = true;
-
-                // remove the coins from available coins vector to avoid double use because of a upcomming SelectCoinsMinConf
-                it = vCoins.erase(it);
-            }
-            else
-                ++it;
-        }
-
-        if (!vinOk)
-            return false; // if vin was not an available coin, cancel (will return "Insufficient funds")
+            const CWalletTx* pcoin = &it->second;
+            // Clearly invalid input, fail
+            if (pcoin->vout.size() <= txin.prevout.n)
+                return false;
+            nValueFromPresetInputs += pcoin->vout[txin.prevout.n].nValue;
+            setPresetCoins.insert(make_pair(pcoin, txin.prevout.n));
+        } else
+            return false; // TODO: Allow non-wallet inputs
     }
 
-    bool state = true;
+    // remove preset inputs from vCoins
+    for (vector<COutput>::iterator it = vCoins.begin(); it != vCoins.end();)
+    {
+        if (setPresetCoins.count(make_pair(it->tx, it->i)))
+            it = vCoins.erase(it);
+        else
+            ++it;
+    }
 
-    // only select further coins if we need to
-    if (nTargetValue-nValueTroughInputs > 0)
-        state = (SelectCoinsMinConf(nTargetValue-nValueTroughInputs, 1, 6, vCoins, setCoinsRet, nValueRet) ||
-            SelectCoinsMinConf(nTargetValue-nValueTroughInputs, 1, 1, vCoins, setCoinsRet, nValueRet) ||
-            (bSpendZeroConfChange && SelectCoinsMinConf(nTargetValue-nValueTroughInputs, 0, 1, vCoins, setCoinsRet, nValueRet)));
+    bool res = nTargetValue <= nValueFromPresetInputs ||
+        SelectCoinsMinConf(nTargetValue - nValueFromPresetInputs, 1, 6, vCoins, setCoinsRet, nValueRet) ||
+        SelectCoinsMinConf(nTargetValue - nValueFromPresetInputs, 1, 1, vCoins, setCoinsRet, nValueRet) ||
+        (bSpendZeroConfChange && SelectCoinsMinConf(nTargetValue - nValueFromPresetInputs, 0, 1, vCoins, setCoinsRet, nValueRet));
 
     // because SelectCoinsMinConf clears the setCoinsRet, we now add the possible inputs to the coinset
-    setCoinsRet.insert(setTempCoins.begin(), setTempCoins.end());
+    setCoinsRet.insert(setPresetCoins.begin(), setPresetCoins.end());
 
-    // increase return value due of possible inputs
-    nValueRet+=nValueTroughInputs;
+    // add preset inputs to the total value selected
+    nValueRet += nValueFromPresetInputs;
 
-    return state;
+    return res;
 }
 
 bool CWallet::FundTransaction(const CTransaction& txToFund, CMutableTransaction& txNew, CAmount &nFeeRet, int& nChangePosRet, std::string& strFailReason)
