@@ -1011,9 +1011,7 @@ Value sendmany(const Array& params, bool fHelp)
     CAmount nFeeRequired = 0;
     int nChangePosRet = -1;
     string strFailReason;
-    CMutableTransaction newTx;
-    std::vector<CTxIn> vins;
-    bool fCreated = pwalletMain->CreateTransaction(vecSend, vins, wtx, newTx, keyChange, nFeeRequired, nChangePosRet, strFailReason);
+    bool fCreated = pwalletMain->CreateTransaction(vecSend, wtx, keyChange, nFeeRequired, nChangePosRet, strFailReason);
     if (!fCreated)
         throw JSONRPCError(RPC_WALLET_INSUFFICIENT_FUNDS, strFailReason);
     if (!pwalletMain->CommitTransaction(wtx, keyChange))
@@ -2381,19 +2379,19 @@ Value fundrawtransaction(const Array& params, bool fHelp)
     RPCTypeCheck(params, boost::assign::list_of(str_type));
 
     // parse hex string from parameter
-    CTransaction tx;
-    if (!DecodeHexTx(tx, params[0].get_str()))
+    CTransaction origTx;
+    if (!DecodeHexTx(origTx, params[0].get_str()))
         throw JSONRPCError(RPC_DESERIALIZATION_ERROR, "TX decode failed");
 
-    CMutableTransaction txNew;
+    CMutableTransaction tx(origTx);
     CAmount nFeeRet;
     string strFailReason;
     int nChangePosRet = -1;
-    if(!pwalletMain->FundTransaction(tx, txNew, nFeeRet, nChangePosRet, strFailReason))
+    if(!pwalletMain->FundTransaction(tx, nFeeRet, nChangePosRet, strFailReason))
         throw JSONRPCError(RPC_INTERNAL_ERROR, strFailReason);
 
     Object result;
-    result.push_back(Pair("hex", EncodeHexTx(txNew)));
+    result.push_back(Pair("hex", EncodeHexTx(tx)));
     result.push_back(Pair("fee", ValueFromAmount(nFeeRet)));
 
     return result;

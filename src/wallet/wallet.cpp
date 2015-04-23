@@ -1723,33 +1723,46 @@ bool CWallet::SelectCoins(const CAmount& nTargetValue, set<pair<const CWalletTx*
     return res;
 }
 
-bool CWallet::FundTransaction(const CTransaction& txToFund, CMutableTransaction& txNew, CAmount &nFeeRet, int& nChangePosRet, std::string& strFailReason)
+bool CWallet::FundTransaction(CMutableTransaction& tx, CAmount &nFeeRet, int& nChangePosRet, std::string& strFailReason)
 {
-    unsigned int nSubtractFeeFromAmount = 0; //TODO: implement subtract fee from amount within fundrawtransaction
     vector<CRecipient> vecSend;
-    vector<CTxIn> vin;
 
-    // Only keep the vouts from the existing transaction.
-    // Form a new CRecipient vector
-    BOOST_FOREACH (const CTxOut& txOut, txToFund.vout)
+    // Turn the txout set into a CRecipient vector
+    BOOST_FOREACH(const CTxOut& txOut, tx.vout)
     {
-        CRecipient recipient = {txOut.scriptPubKey, txOut.nValue, nSubtractFeeFromAmount};
+        CRecipient recipient = {txOut.scriptPubKey, txOut.nValue, false};
         vecSend.push_back(recipient);
-    }
-
-    // Store possible vin so we might only partial-final-fund the tx
-    BOOST_FOREACH (const CTxIn& txIn, txToFund.vin)
-    {
-        vin.push_back(txIn);
     }
 
     CReserveKey reservekey(this);
     CWalletTx wtx;
-    return CreateTransaction(vecSend, vin, wtx, txNew, reservekey, nFeeRet, nChangePosRet, strFailReason, NULL, false);
+    if (!CreateTransaction(vecSend, wtx, reservekey, nFeeRet, nChangePosRet, strFailReason, NULL, tx.vin, false))
+        return false;
+
+    if (nChangePosRet != -1)
+        tx.vout.insert(tx.vout.begin() + nChangePosRet, wtx.vout[nChangePosRet]);
+
+    // Add new txins (keeping original txin scriptSig/order)
+    BOOST_FOREACH(const CTxIn& txin, wtx.vin)
+    {
+        bool found = false;
+        BOOST_FOREACH(const CTxIn& origTxIn, tx.vin)
+        {
+            if (txin.prevout.hash == origTxIn.prevout.hash && txin.prevout.n == origTxIn.prevout.n)
+            {
+                found = true;
+                break;
+            }
+        }
+        if (!found)
+            tx.vin.push_back(txin);
+    }
+
+    return true;
 }
 
-bool CWallet::CreateTransaction(const vector<CRecipient>& vecSend, const vector<CTxIn> vInputs,
-                                CWalletTx& wtxNew, CMutableTransaction& txNew, CReserveKey& reservekey, CAmount& nFeeRet, int& nChangePosRet, std::string& strFailReason, const CCoinControl* coinControl, bool sign)
+bool CWallet::CreateTransaction(const vector<CRecipient>& vecSend, CWalletTx& wtxNew, CReserveKey& reservekey, CAmount& nFeeRet,
+                                int& nChangePosRet, std::string& strFailReason, const CCoinControl* coinControl, const std::vector<CTxIn>& vInputs, bool sign)
 {
     CAmount nValue = 0;
     unsigned int nSubtractFeeFromAmount = 0;
@@ -1773,6 +1786,7 @@ bool CWallet::CreateTransaction(const vector<CRecipient>& vecSend, const vector<
 
     wtxNew.fTimeReceivedIsTxTime = true;
     wtxNew.BindWallet(this);
+    CMutableTransaction txNew;
 
     // Discourage fee sniping.
     //
@@ -2013,14 +2027,6 @@ bool CWallet::CreateTransaction(const vector<CRecipient>& vecSend, const vector<
     }
 
     return true;
-}
-
-bool CWallet::CreateTransaction(const vector<CRecipient>& vecSend,
-                                CWalletTx& wtxNew, CReserveKey& reservekey, CAmount& nFeeRet, int& nChangePosRet, std::string& strFailReason, const CCoinControl* coinControl, bool sign)
-{
-    CMutableTransaction txNew;
-    vector<CTxIn> vInputs;
-    return CreateTransaction(vecSend, vInputs, wtxNew, txNew, reservekey, nFeeRet, nChangePosRet, strFailReason, coinControl, sign);
 }
 
 /**
