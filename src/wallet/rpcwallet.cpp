@@ -2361,8 +2361,9 @@ Value fundrawtransaction(const Array& params, bool fHelp)
                             "1. \"hexstring\"    (string, required) The hex string of the raw transaction\n"
                             "\nResult:\n"
                             "{\n"
-                            "  \"hex\": \"value\",   (string)  The resulting raw transaction (hex-encoded string)\n"
-                            "  \"fee\": n            (numeric) The fee added to the transaction\n"
+                            "  \"hex\":       \"value\", (string)  The resulting raw transaction (hex-encoded string)\n"
+                            "  \"fee\":       n,         (numeric) The fee added to the transaction\n"
+                            "  \"changepos\": n          (numeric) The position of the added change output, or -1\n"
                             "}\n"
                             "\"hex\"             \n"
                             "\nExamples:\n"
@@ -2384,15 +2385,16 @@ Value fundrawtransaction(const Array& params, bool fHelp)
         throw JSONRPCError(RPC_DESERIALIZATION_ERROR, "TX decode failed");
 
     CMutableTransaction tx(origTx);
-    CAmount nFeeRet;
+    CAmount nFee;
     string strFailReason;
-    int nChangePosRet = -1;
-    if(!pwalletMain->FundTransaction(tx, nFeeRet, nChangePosRet, strFailReason))
+    int nChangePos = -1;
+    if(!pwalletMain->FundTransaction(tx, nFee, nChangePos, strFailReason))
         throw JSONRPCError(RPC_INTERNAL_ERROR, strFailReason);
 
     Object result;
     result.push_back(Pair("hex", EncodeHexTx(tx)));
-    result.push_back(Pair("fee", ValueFromAmount(nFeeRet)));
+    result.push_back(Pair("changepos", nChangePos));
+    result.push_back(Pair("fee", ValueFromAmount(nFee)));
 
     return result;
 }
