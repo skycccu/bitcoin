@@ -64,6 +64,7 @@ class RawTransactionsTest(BitcoinTestFramework):
             totalOut += out['value']
 
         assert_equal(len(dec_tx['vin']), 1) #one vin coin
+        assert_equal(dec_tx['vin'][0]['scriptSig']['hex'], '')
         assert_equal(fee + totalOut, 1.5) #the 1.5BTC coin must be taken
 
         ##############################
@@ -82,6 +83,8 @@ class RawTransactionsTest(BitcoinTestFramework):
             totalOut += out['value']
 
         assert_equal(len(dec_tx['vin']), 2) #one vin coin
+        assert_equal(dec_tx['vin'][0]['scriptSig']['hex'], '')
+        assert_equal(dec_tx['vin'][1]['scriptSig']['hex'], '')
         assert_equal(fee + totalOut, 2.5) #the 1.5BTC+1.0BTC coins must have be taken
 
         ##############################
@@ -100,6 +103,7 @@ class RawTransactionsTest(BitcoinTestFramework):
             totalOut += out['value']
 
         assert_equal(len(dec_tx['vin']), 1) #one vin coin
+        assert_equal(dec_tx['vin'][0]['scriptSig']['hex'], '')
         assert_equal(fee + totalOut, 5.0) #the 5.0BTC coin must have be taken
 
 
@@ -119,6 +123,8 @@ class RawTransactionsTest(BitcoinTestFramework):
             totalOut += out['value']
 
         assert_equal(len(dec_tx['vin']), 2) #one vin coin
+        assert_equal(dec_tx['vin'][0]['scriptSig']['hex'], '')
+        assert_equal(dec_tx['vin'][1]['scriptSig']['hex'], '')
         assert_equal(fee + totalOut, 6.0) #the 5.0BTC + 1.0BTC coins must have be taken
 
 
