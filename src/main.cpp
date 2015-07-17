@@ -4397,7 +4397,7 @@ bool static ProcessMessage(CNode* pfrom, string strCommand, CDataStream& vRecv, 
             // Always relay transactions received from whitelisted peers, even
             // if they are already in the mempool (allowing the node to function
             // as a gateway for nodes hidden behind it).
-            RelayTransaction(tx);
+            //RelayTransaction(tx);
         }
         int nDoS = 0;
         if (state.IsInvalid(nDoS))
