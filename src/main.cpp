@@ -4370,7 +4370,7 @@ bool static ProcessMessage(CNode* pfrom, string strCommand, CDataStream& vRecv, 
                 // FIXME: This includes invalid transactions, which means a
                 // whitelisted peer could get us banned! We may want to change
                 // that.
-                RelayTransaction(tx);
+                //RelayTransaction(tx);
             }
         }
         int nDoS = 0;
