@@ -330,6 +330,8 @@ private:
     void UpdateParent(txiter entry, txiter parent, bool add);
     void UpdateChild(txiter entry, txiter child, bool add);
 
+    size_t GuessDynamicMemoryUsage(const CTxMemPoolEntry& entry) const;
+
 public:
     std::map<COutPoint, CInPoint> mapNextTx;
     std::map<uint256, std::pair<double, CAmount> > mapDeltas;
