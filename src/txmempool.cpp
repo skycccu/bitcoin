@@ -885,9 +885,6 @@ CFeeRate CTxMemPool::GetMinFee(size_t sizelimit) const {
 
         rollingMinimumFeeRate = rollingMinimumFeeRate / pow(2.0, (time - lastRollingFeeUpdate) / halflife);
         lastRollingFeeUpdate = time;
-
-        if (rollingMinimumFeeRate < ::minRelayTxFee.GetFeePerK())
-            rollingMinimumFeeRate = 0;
     }
     return CFeeRate(rollingMinimumFeeRate);
 }
@@ -905,9 +902,9 @@ void CTxMemPool::TrimToSize(size_t sizelimit) {
 
     while (DynamicMemoryUsage() > sizelimit) {
         indexed_transaction_set::nth_index<1>::type::iterator it = mapTx.get<1>().begin();
+        trackPackageRemoved(CFeeRate(it->GetFeesWithDescendants(), it->GetSizeWithDescendants()));
         setEntries stage;
         CalculateDescendants(mapTx.project<0>(it), stage);
         RemoveStaged(stage);
-        trackPackageRemoved(CFeeRate(it->GetFeesWithDescendants(), it->GetSizeWithDescendants()));
     }
 }

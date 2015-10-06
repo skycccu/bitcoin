@@ -288,7 +288,7 @@ private:
     mutable int64_t lastRollingFeeUpdate;
     mutable bool blockSinceLastRollingFeeBump;
     mutable double rollingMinimumFeeRate; //! minimum fee to get into the pool, decreases exponentially
-    static const double ROLLING_FEE_HALFLIFE = 60 * 60 * 12;
+    static const int ROLLING_FEE_HALFLIFE = 60 * 60 * 12;
 
     void trackPackageRemoved(const CFeeRate& rate);
 
