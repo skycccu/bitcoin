@@ -4308,10 +4308,10 @@ bool static ProcessMessage(CNode* pfrom, string strCommand, CDataStream& vRecv, 
             RelayTransaction(tx);
             vWorkQueue.push_back(inv.hash);
 
-            LogPrint("mempool", "AcceptToMemoryPool: peer=%d: accepted %s (poolsz %u)\n",
+            LogPrint("mempool", "AcceptToMemoryPool: peer=%d: accepted %s (poolsz %u txn, %u KB)\n",
                 pfrom->id,
                 tx.GetHash().ToString(),
-                mempool.size());
+                mempool.size(), mempool.DynamicMemoryUsage() / 1024);
 
             // Recursively process any orphan transactions that depended on this one
             set<NodeId> setMisbehaving;
