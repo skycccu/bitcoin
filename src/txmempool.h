@@ -412,11 +412,20 @@ public:
      */
     bool CalculateMemPoolAncestors(const CTxMemPoolEntry &entry, setEntries &setAncestors, uint64_t limitAncestorCount, uint64_t limitAncestorSize, uint64_t limitDescendantCount, uint64_t limitDescendantSize, std::string &errString, bool fSearchForParents = true);
 
-    /** The minimum fee to get into the mempool, which may itself not be enough for larger-sized transactions */
-    CFeeRate GetMinFee(size_t sizelimit) const;
+    /** The minimum fee to get into the mempool, which may itself not be enough
+	 *  for larger-sized transactions.
+	 *  minReasonableFeeRate is used to bound the time it takes the fee rate to
+	 *  go back down all the way to 0. When the feerate would otherwise be half
+	 *  of this, it is set to 0 instead. It should be set to a value under which
+	 *  transactions are considered 0-fee. It should be the same as the one used
+	 *  by TrimToSize()
+	 */
+    CFeeRate GetMinFee(size_t sizelimit, const CFeeRate& minReasonableFeeRate) const;
 
-    /** Remove transactions from the mempool until its dynamic size is <= sizelimit */
-    void TrimToSize(size_t sizelimit);
+    /** Remove transactions from the mempool until its dynamic size is <= sizelimit.
+	 *  See GetMinFee for an explination of minReasonableFeeRate.
+	 */
+    void TrimToSize(size_t sizelimit, const CFeeRate& minReasonableFeeRate);
 
     /** Expire all transaction (and their dependencies) in the mempool older than time. Return the number of removed transactions. */
     int Expire(int64_t time);
