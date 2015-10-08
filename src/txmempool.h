@@ -83,7 +83,7 @@ public:
 
     const CTransaction& GetTx() const { return this->tx; }
     double GetPriority(unsigned int currentHeight) const;
-    CAmount GetFee() const { return nFee; }
+    const CAmount& GetFee() const { return nFee; }
     size_t GetTxSize() const { return nTxSize; }
     int64_t GetTime() const { return nTime; }
     unsigned int GetHeight() const { return nHeight; }
@@ -160,9 +160,9 @@ public:
         double f2 = aSize * bFees;
 
         if (f1 == f2) {
-            return a.GetTime() < b.GetTime();
+            return a.GetTime() >= b.GetTime();
         }
-        return f1 > f2;
+        return f1 < f2;
     }
 
     // Calculate which feerate to use for an entry (avoiding division).
@@ -211,9 +211,10 @@ public:
  *
  * CTxMemPool::mapTx, and CTxMemPoolEntry bookkeeping:
  *
- * mapTx is a boost::multi_index that sorts the mempool on 2 criteria:
+ * mapTx is a boost::multi_index that sorts the mempool on 3 criteria:
  * - transaction hash
  * - feerate [we use max(feerate of tx, feerate of tx with all descendants)]
+ * - time in mempool
  *
  * Note: the term "descendant" refers to in-mempool transactions that depend on
  * this one, while "ancestor" refers to in-mempool transactions that a given
@@ -284,6 +285,13 @@ private:
     uint64_t totalTxSize; //! sum of all mempool tx' byte sizes
     uint64_t cachedInnerUsage; //! sum of dynamic memory usage of all the map elements (NOT the maps themselves)
 
+    mutable int64_t lastRollingFeeUpdate;
+    mutable bool blockSinceLastRollingFeeBump;
+    mutable double rollingMinimumFeeRate; //! minimum fee to get into the pool, decreases exponentially
+    static const int ROLLING_FEE_HALFLIFE = 60 * 60 * 12;
+
+    void trackPackageRemoved(const CFeeRate& rate);
+
 public:
     typedef boost::multi_index_container<
         CTxMemPoolEntry,
@@ -294,6 +302,11 @@ public:
             boost::multi_index::ordered_non_unique<
                 boost::multi_index::identity<CTxMemPoolEntry>,
                 CompareTxMemPoolEntryByFee
+            >,
+            // sorted by entry time
+            boost::multi_index::ordered_non_unique<
+                boost::multi_index::identity<CTxMemPoolEntry>,
+                CompareTxMemPoolEntryByEntryTime
             >
         >
     > indexed_transaction_set;
@@ -365,7 +378,7 @@ public:
 
     /** Affect CreateNewBlock prioritisation of transactions */
     void PrioritiseTransaction(const uint256 hash, const std::string strHash, double dPriorityDelta, const CAmount& nFeeDelta);
-    void ApplyDeltas(const uint256 hash, double &dPriorityDelta, CAmount &nFeeDelta);
+    void ApplyDeltas(const uint256 hash, double &dPriorityDelta, CAmount &nFeeDelta) const;
     void ClearPrioritisation(const uint256 hash);
 
 public:
@@ -396,6 +409,24 @@ public:
      *    look up parents from mapLinks. Must be true for entries not in the mempool
      */
     bool CalculateMemPoolAncestors(const CTxMemPoolEntry &entry, setEntries &setAncestors, uint64_t limitAncestorCount, uint64_t limitAncestorSize, uint64_t limitDescendantCount, uint64_t limitDescendantSize, std::string &errString, bool fSearchForParents = true);
+
+    /** The minimum fee to get into the mempool, which may itself not be enough
+	 *  for larger-sized transactions.
+	 *  minReasonableFeeRate is used to bound the time it takes the fee rate to
+	 *  go back down all the way to 0. When the feerate would otherwise be half
+	 *  of this, it is set to 0 instead. It should be set to a value under which
+	 *  transactions are considered 0-fee. It should be the same as the one used
+	 *  by TrimToSize()
+	 */
+    CFeeRate GetMinFee(size_t sizelimit, const CFeeRate& minReasonableFeeRate) const;
+
+    /** Remove transactions from the mempool until its dynamic size is <= sizelimit.
+	 *  See GetMinFee for an explination of minReasonableFeeRate.
+	 */
+    void TrimToSize(size_t sizelimit, const CFeeRate& minReasonableFeeRate);
+
+    /** Expire all transaction (and their dependencies) in the mempool older than time. Return the number of removed transactions. */
+    int Expire(int64_t time);
 
     unsigned long size()
     {
