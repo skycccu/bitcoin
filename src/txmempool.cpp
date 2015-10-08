@@ -792,14 +792,6 @@ size_t CTxMemPool::DynamicMemoryUsage() const {
     return memusage::MallocUsage(sizeof(CTxMemPoolEntry) + 9 * sizeof(void*)) * mapTx.size() + memusage::DynamicUsage(mapNextTx) + memusage::DynamicUsage(mapDeltas) + memusage::DynamicUsage(mapLinks) + cachedInnerUsage;
 }
 
-size_t CTxMemPool::GuessDynamicMemoryUsage(const CTxMemPoolEntry& entry) const {
-    setEntries s;
-    return memusage::MallocUsage(sizeof(CTxMemPoolEntry) + 9 * sizeof(void*)) +
-            entry.DynamicMemoryUsage() +
-            (memusage::IncrementalDynamicUsage(mapNextTx) + memusage::IncrementalDynamicUsage(s)) * entry.GetTx().vin.size() +
-            memusage::IncrementalDynamicUsage(mapLinks);
-}
-
 void CTxMemPool::RemoveStaged(setEntries &stage) {
     AssertLockHeld(cs);
     UpdateForRemoveFromMempool(stage);
