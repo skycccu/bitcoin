@@ -345,7 +345,7 @@ bool static ScanHash(const CBlockHeader *pblock, uint32_t& nNonce, uint256 *phas
 
         // Return the nonce if the hash has at least some zero bits,
         // caller will check if it has enough to reach the target
-        if (((uint16_t*)phash)[15] == 0)
+        if (phash->begin()[31] == 0 && phash->begin()[30] == 0)
             return true;
 
         // If nothing found after trying for a while, return -1
