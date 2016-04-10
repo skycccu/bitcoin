@@ -1362,6 +1362,7 @@ void ThreadSocketHandler()
 void ThreadMapPort()
 {
     std::string port = strprintf("%u", GetListenPort());
+    std::string UDPPort = strprintf("%u", GetUDPInboundPort());
     const char * multicastif = 0;
     const char * minissdpdpath = 0;
     struct UPNPDev * devlist = 0;
@@ -1419,10 +1420,28 @@ void ThreadMapPort()
 #endif
 
                 if(r!=UPNPCOMMAND_SUCCESS)
-                    LogPrintf("AddPortMapping(%s, %s, %s) failed with code %d (%s)\n",
+                    LogPrintf("AddPortMapping(%s, %s, %s, TCP) failed with code %d (%s)\n",
                         port, port, lanaddr, r, strupnperror(r));
                 else
-                    LogPrintf("UPnP Port Mapping successful.\n");
+                    LogPrintf("TCP UPnP Port Mapping successful.\n");
+
+                if (GetUDPInboundPort()) {
+#ifndef UPNPDISCOVER_SUCCESS
+                    /* miniupnpc 1.5 */
+                    r = UPNP_AddPortMapping(urls.controlURL, data.first.servicetype,
+                                        UDPPort.c_str(), UDPPort.c_str(), lanaddr, strDesc.c_str(), "UDP", 0);
+#else
+                    /* miniupnpc 1.6 */
+                    r = UPNP_AddPortMapping(urls.controlURL, data.first.servicetype,
+                                        UDPPort.c_str(), UDPPort.c_str(), lanaddr, strDesc.c_str(), "UDP", 0, "0");
+#endif
+
+                    if(r!=UPNPCOMMAND_SUCCESS)
+                        LogPrintf("AddPortMapping(%s, %s, %s, UDP) failed with code %d (%s)\n",
+                            UDPPort, UDPPort, lanaddr, r, strupnperror(r));
+                    else
+                        LogPrintf("UDP UPnP Port Mapping successful.\n");
+                }
 
                 MilliSleep(20*60*1000); // Refresh every 20 minutes
             }
@@ -1430,7 +1449,11 @@ void ThreadMapPort()
         catch (const boost::thread_interrupted&)
         {
             r = UPNP_DeletePortMapping(urls.controlURL, data.first.servicetype, port.c_str(), "TCP", 0);
-            LogPrintf("UPNP_DeletePortMapping() returned: %d\n", r);
+            LogPrintf("UPNP_DeletePortMapping() for TCP returned: %d\n", r);
+            if (GetUDPInboundPort()) {
+                r = UPNP_DeletePortMapping(urls.controlURL, data.first.servicetype, UDPPort.c_str(), "UDP", 0);
+                LogPrintf("UPNP_DeletePortMapping() for UDP returned: %d\n", r);
+            }
             freeUPNPDevlist(devlist); devlist = 0;
             FreeUPNPUrls(&urls);
             throw;
