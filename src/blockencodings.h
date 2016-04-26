@@ -5,6 +5,7 @@
 #ifndef BITCOIN_BLOCK_ENCODINGS_H
 #define BITCOIN_BLOCK_ENCODINGS_H
 
+#include "fec.h" // For consumers - defines FEC_CHUNK_SIZE
 #include "primitives/block.h"
 
 #include <memory>
@@ -201,6 +202,87 @@ public:
     ReadStatus InitData(const CBlockHeaderAndShortTxIDs& cmpctblock);
     bool IsTxAvailable(size_t index) const;
     ReadStatus FillBlock(CBlock& block, const std::vector<CTransaction>& vtx_missing) const;
+};
+
+
+// FEC-Supporting extensions
+
+class CBlockHeaderAndLengthShortTxIDs : public CBlockHeaderAndShortTxIDs {
+private:
+    std::vector<uint32_t> txlens; // size by TransactionCompressor
+    friend class PartiallyDownloadedChunkBlock;
+public:
+    CBlockHeaderAndLengthShortTxIDs(const CBlock& block);
+
+    // Dummy for deserialization
+    CBlockHeaderAndLengthShortTxIDs() {}
+
+    // Fills a map from offset within a FEC-coded block to the tx index in the block
+    // Returns false if this object is invalid (txlens.size() != shortxids.size())
+    ReadStatus FillIndexOffsetMap(std::map<size_t, size_t>& index_offsets) const;
+
+    ADD_SERIALIZE_METHODS;
+
+    template <typename Stream, typename Operation>
+    inline void SerializationOp(Stream& s, Operation ser_action, int nType, int nVersion) {
+        READWRITE(*(CBlockHeaderAndShortTxIDs*)this);
+        txlens.resize(shorttxids.size());
+        for (size_t i = 0; i < txlens.size(); i++)
+            READWRITE(VARINT(txlens[i]));
+    }
+};
+
+class ChunkCodedBlock {
+private:
+    std::vector<unsigned char> codedBlock;
+public:
+    ChunkCodedBlock(const CBlock& block, const CBlockHeaderAndLengthShortTxIDs& headerAndIDs);
+    // Note that the coded block may be empty (ie prefilled txn in the header was full)
+    const std::vector<unsigned char>& GetCodedBlock() const { return codedBlock; }
+};
+
+class VectorOutputStream;
+class PartiallyDownloadedChunkBlock : private PartiallyDownloadedBlock {
+private:
+    std::map<size_t, size_t> index_offsets; // offset -> txindex
+    std::vector<unsigned char> codedBlock;
+    std::vector<bool> chunksAvailable;
+    uint32_t remainingChunks;
+    bool allTxnFromMempool;
+    bool block_finalized = false;
+    CBlock decoded_block;
+
+    // Things used in the iterative fill-from-mempool:
+    std::map<size_t, size_t>::iterator fill_coding_index_offsets_it;
+    std::map<uint16_t, uint16_t> txn_prefilled; // index -> number of prefilled txn at or below index
+    bool haveChunk = true;
+
+    mutable uint256 block_hash; // Cached because its called in critical-path by udpnet
+
+    bool SerializeTransaction(VectorOutputStream& stream, std::map<size_t, size_t>::iterator it);
+public:
+    PartiallyDownloadedChunkBlock(CTxMemPool* poolIn) : PartiallyDownloadedBlock(poolIn) {}
+
+    ReadStatus InitData(const CBlockHeaderAndLengthShortTxIDs& comprblock);
+    ReadStatus DoIterativeFill(size_t& firstChunkProcessed);
+    bool IsIterativeFillDone() const;
+
+    bool IsBlockAvailable() const;
+    ReadStatus FinalizeBlock();
+    const CBlock& GetBlock() const { assert(block_finalized); return decoded_block; }
+    const std::vector<unsigned char>& GetCodedBlock() const { assert(AreChunksAvailable() && IsBlockAvailable()); return codedBlock; }
+    uint256& GetBlockHash() const;
+
+    // Chunk-based methods are only callable if AreChunksAvailable()
+    bool AreChunksAvailable() const;
+    size_t GetChunkCount() const;
+    bool IsChunkAvailable(size_t chunk) const;
+
+    // To provide a chunk, write it to GetChunk and call MarkChunkAvailable
+    // The unavailable chunk pointer must be written to before GetBlock,
+    // but can happen after MarkChunkAvailable
+    unsigned char* GetChunk(size_t chunk);
+    void MarkChunkAvailable(size_t chunk);
 };
 
 #endif
