@@ -116,6 +116,14 @@ namespace {
             if (pa->nChainWork < pb->nChainWork) return true;
 
             // ... then by earliest time received, ...
+            // Because they are 16-bits, we have to check for overflow
+            if (pa->nSequenceId > 3 * std::numeric_limits<uint16_t>::max() / 4 &&
+                pb->nSequenceId < std::numeric_limits<uint16_t>::max() / 4)
+                return false;
+            if (pb->nSequenceId > 3 * std::numeric_limits<uint16_t>::max() / 4 &&
+                pa->nSequenceId < std::numeric_limits<uint16_t>::max() / 4)
+                return true;
+
             if (pa->nSequenceId < pb->nSequenceId) return false;
             if (pa->nSequenceId > pb->nSequenceId) return true;
 
@@ -159,7 +167,7 @@ namespace {
      */
     CCriticalSection cs_nBlockSequenceId;
     /** Blocks loaded from disk are assigned id 0, so start the counter at 1. */
-    uint32_t nBlockSequenceId = 1;
+    uint16_t nBlockSequenceId = 1;
 
     /**
      * Sources of received blocks, saved to be able to send them reject

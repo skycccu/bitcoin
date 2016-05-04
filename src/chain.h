@@ -100,6 +100,9 @@ enum BlockStatus: uint32_t {
 class CBlockIndex
 {
 public:
+    //! (memory only) Total amount of work (expected number of hashes) in the chain up to and including this block
+    arith_uint128 nChainWork;
+
     //! pointer to the hash of the block, if any. Memory is owned by this CBlockIndex
     const uint256* phashBlock;
 
@@ -112,29 +115,16 @@ public:
     //! height of the entry in the chain. The genesis block has height 0
     int nHeight;
 
-    //! Which # file this block is stored in (blk?????.dat)
-    int nFile;
-
     //! Byte offset within blk?????.dat where this block's data is stored
     unsigned int nDataPos;
 
     //! Byte offset within rev?????.dat where this block's undo data is stored
     unsigned int nUndoPos;
 
-    //! (memory only) Total amount of work (expected number of hashes) in the chain up to and including this block
-    arith_uint128 nChainWork;
-
-    //! Number of transactions in this block.
-    //! Note: in a potential headers-first mode, this number cannot be relied upon
-    unsigned int nTx;
-
     //! (memory only) Number of transactions in the chain up to and including this block.
     //! This value will be non-zero only if and only if transactions for this block and all its parents are available.
     //! Change to 64-bit type when necessary; won't happen before 2030
     unsigned int nChainTx;
-
-    //! Verification status of this block. See enum BlockStatus
-    unsigned int nStatus;
 
     //! block header
     int nVersion;
@@ -143,8 +133,18 @@ public:
     unsigned int nBits;
     unsigned int nNonce;
 
+    //! Number of transactions in this block.
+    //! Note: in a potential headers-first mode, this number cannot be relied upon
+    uint16_t nTx;
+
     //! (memory only) Sequential id assigned to distinguish order in which blocks are received.
-    uint32_t nSequenceId;
+    uint16_t nSequenceId;
+
+    //! Which # file this block is stored in (blk?????.dat)
+    uint16_t nFile;
+
+    //! Verification status of this block. See enum BlockStatus
+    unsigned char nStatus;
 
     void SetNull()
     {
@@ -306,7 +306,11 @@ public:
             READWRITE(VARINT(nVersion));
 
         READWRITE(VARINT(nHeight));
-        READWRITE(VARINT(nStatus));
+        uint64_t nStatusRead = nStatus;
+        READWRITE(VARINT(nStatusRead));
+        assert(nStatusRead < std::numeric_limits<unsigned char>::max());
+        nStatus = nStatusRead;
+
         READWRITE(VARINT(nTx));
         if (nStatus & (BLOCK_HAVE_DATA | BLOCK_HAVE_UNDO))
             READWRITE(VARINT(nFile));
