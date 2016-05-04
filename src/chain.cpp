@@ -111,7 +111,7 @@ void CBlockIndex::BuildSkip()
         pskip = pprev->GetAncestor(GetSkipHeight(nHeight));
 }
 
-arith_uint256 GetBlockProof(const CBlockIndex& block)
+arith_uint128 GetBlockProof(const CBlockIndex& block)
 {
     arith_uint256 bnTarget;
     bool fNegative;
@@ -131,12 +131,12 @@ int64_t GetBlockProofEquivalentTime(const CBlockIndex& to, const CBlockIndex& fr
     arith_uint256 r;
     int sign = 1;
     if (to.nChainWork > from.nChainWork) {
-        r = to.nChainWork - from.nChainWork;
+        r = arith_uint256(to.nChainWork - from.nChainWork);
     } else {
-        r = from.nChainWork - to.nChainWork;
+        r = arith_uint256(from.nChainWork - to.nChainWork);
         sign = -1;
     }
-    r = r * arith_uint256(params.nPowTargetSpacing) / GetBlockProof(tip);
+    r = r * arith_uint256(params.nPowTargetSpacing) / arith_uint256(GetBlockProof(tip));
     if (r.bits() > 63) {
         return sign * std::numeric_limits<int64_t>::max();
     }

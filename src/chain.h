@@ -122,7 +122,7 @@ public:
     unsigned int nUndoPos;
 
     //! (memory only) Total amount of work (expected number of hashes) in the chain up to and including this block
-    arith_uint256 nChainWork;
+    arith_uint128 nChainWork;
 
     //! Number of transactions in this block.
     //! Note: in a potential headers-first mode, this number cannot be relied upon
@@ -155,7 +155,7 @@ public:
         nFile = 0;
         nDataPos = 0;
         nUndoPos = 0;
-        nChainWork = arith_uint256();
+        nChainWork = arith_uint128();
         nTx = 0;
         nChainTx = 0;
         nStatus = 0;
@@ -280,7 +280,7 @@ public:
     const CBlockIndex* GetAncestor(int height) const;
 };
 
-arith_uint256 GetBlockProof(const CBlockIndex& block);
+arith_uint128 GetBlockProof(const CBlockIndex& block);
 /** Return the time it would take to redo the work difference between from and to, assuming the current hashrate corresponds to the difficulty at tip, in seconds. */
 int64_t GetBlockProofEquivalentTime(const CBlockIndex& to, const CBlockIndex& from, const CBlockIndex& tip, const Consensus::Params&);
 
