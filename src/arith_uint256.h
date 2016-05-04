@@ -14,6 +14,14 @@
 #include <vector>
 
 class uint256;
+template<unsigned int BITS> class base_blob;
+template<unsigned int BITS> class base_uint;
+
+
+template <unsigned int BITS>
+base_blob<BITS> ArithToUint(const base_uint<BITS> &a);
+template <unsigned int BITS>
+base_uint<BITS> UintToArith(const base_blob<BITS> &a);
 
 class uint_error : public std::runtime_error {
 public:
@@ -247,6 +255,23 @@ public:
         assert(WIDTH >= 2);
         return pn[0] | (uint64_t)pn[1] << 32;
     }
+
+    template<unsigned int OTHER_BITS>
+    void assign_from_uint(const base_uint<OTHER_BITS> &b);
+
+    template<unsigned int OTHER_BITS> friend class base_uint;
+    friend base_blob<BITS> ArithToUint<BITS>(const base_uint<BITS> &a);
+    friend base_uint<BITS> UintToArith<BITS>(const base_blob<BITS> &a);
+};
+
+/** 128-bit unsigned big integer. */
+class arith_uint128 : public base_uint<128> {
+public:
+    arith_uint128() {}
+    arith_uint128(const base_uint<128>& b) : base_uint<128>(b) {}
+    arith_uint128(const base_uint<256>& b) { assign_from_uint(b); }
+    arith_uint128(uint64_t b) : base_uint<128>(b) {}
+    explicit arith_uint128(const std::string& str) : base_uint<128>(str) {}
 };
 
 /** 256-bit unsigned big integer. */
@@ -254,6 +279,7 @@ class arith_uint256 : public base_uint<256> {
 public:
     arith_uint256() {}
     arith_uint256(const base_uint<256>& b) : base_uint<256>(b) {}
+    arith_uint256(const base_uint<128>& b) { assign_from_uint(b); }
     arith_uint256(uint64_t b) : base_uint<256>(b) {}
     explicit arith_uint256(const std::string& str) : base_uint<256>(str) {}
 
