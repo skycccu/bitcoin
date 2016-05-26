@@ -2430,7 +2430,7 @@ CNode::CNode(SOCKET hSocketIn, const CAddress& addrIn, const std::string& addrNa
     addrName = addrNameIn == "" ? addr.ToStringIPPort() : addrNameIn;
     nVersion = 0;
     strSubVer = "";
-    fWhitelisted = false;
+    fWhitelisted = CNode::IsWhitelistedRange(addrIn);
     fOneShot = false;
     fClient = false; // set by version message
     fInbound = fInboundIn;
