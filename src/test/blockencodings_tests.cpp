@@ -9,6 +9,8 @@
 
 #include "test/test_bitcoin.h"
 
+#include "test/data/block413567.hex.h"
+
 #include <boost/test/unit_test.hpp>
 
 struct RegtestingSetup : public TestingSetup {
