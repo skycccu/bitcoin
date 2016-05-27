@@ -94,6 +94,12 @@ public:
 	LDPCFecSession ();
 	~LDPCFecSession ();
 
+/**
+ * Lots of manually-initialized memory means we absolutely cannot copy Session objects
+ */
+	LDPCFecSession(const LDPCFecSession&)=delete;
+	LDPCFecSession& operator=(const LDPCFecSession& o)=delete;
+
 
 /**
  * InitSession: Initializes the LDPC session.
