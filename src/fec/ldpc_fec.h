@@ -51,6 +51,8 @@
 
 /****** CONSTANT AND CLASS DEFINITION *****************************************/
 
+#define FEC_CHUNK_SIZE 1024
+
 /**             
  * Error status returned by functions.
  */             
@@ -467,16 +469,16 @@ protected:
 				//			1 means infos
 				//			2 means debug
 
-	unsigned int	m_symbolSize;	// Size of symbols in BYTES
+	static const unsigned int	m_symbolSize = FEC_CHUNK_SIZE;	// Size of symbols in BYTES
 #if defined (__LP64__) || (__WORDSIZE == 64)
-	unsigned int	m_symbolSize64;	// Size of symbols in 64bits unit
+	static const unsigned int	m_symbolSize64 = FEC_CHUNK_SIZE / 8;	// Size of symbols in 64bits unit
 					// (m_symbolSize64 = floor(m_symbolSize/8.0))
 					// we use floor since symbol size
 					// can be a multiple of 32 bits.
 #endif
-	unsigned int	m_symbolSize32;	// Size of symbols in 32bits unit
+	static const unsigned int	m_symbolSize32 = FEC_CHUNK_SIZE / 4;	// Size of symbols in 32bits unit
 					// (m_symbolSize32 = m_symbolSize/4)
-	unsigned int	m_symbolSize32rem; // Remaining bytes when the symbol
+	static const unsigned int	m_symbolSize32rem = FEC_CHUNK_SIZE % 4; // Remaining bytes when the symbol
 					// size is not multiple of 32 bits.
 					// (m_symbolSize32rem = m_symbolSize%4)
 

@@ -254,7 +254,7 @@ protected:
 	bool		m_SchemeInitialized;
 
 #	define		m_nbSymbols	(m_nbParitySymbols + m_nbSourceSymbols)
-	int		m_symbolSize;
+	static const int		m_symbolSize = FEC_CHUNK_SIZE;
 	int		m_pktSize;
 	int		m_nbSourcePkts;
 	int		m_nbParityPkts;

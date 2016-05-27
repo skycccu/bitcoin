@@ -72,7 +72,8 @@ LDPCFecSession::InitSession (	int nbSourceSymbols,
 	m_initialized	= false;
 	m_sessionFlags	= flags;
 	m_sessionType	= codecType;
-	m_symbolSize	= symbolSize;
+	if (symbolSize != FEC_CHUNK_SIZE)
+		return LDPC_ERROR;
 
 #ifdef PERF_COUNT_XOR
 	m_nbXor = 0;
@@ -81,10 +82,10 @@ LDPCFecSession::InitSession (	int nbSourceSymbols,
 #if defined (__LP64__) || (__WORDSIZE == 64)
 	// symbolSize is not necessarily a multiple of 8, but >> 3 will divide
 	// it by 8 and keep the integral part automatically.
-	m_symbolSize64	= symbolSize >> 3;
+	//m_symbolSize64	= symbolSize >> 3;
 #endif 
-	m_symbolSize32	= symbolSize >> 2;
-	m_symbolSize32rem = symbolSize % 4;	// Remaining bytes when the symbol
+	//m_symbolSize32	= symbolSize >> 2;
+	//m_symbolSize32rem = symbolSize % 4;	// Remaining bytes when the symbol
 						// size is not multiple of 32 bits.
 	if (nbSourceSymbols + nbParitySymbols > this->GetMaxN()) {
 		fprintf(stderr, "LDPCFecSession::InitSession: ERROR: the total number of symbols (%d) is too large (%d max)\n",

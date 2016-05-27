@@ -65,6 +65,10 @@ LDPCFecScheme::DetermineSymbolSize (INT64	objectSize,
 				    int		*symbolSize,
 				    int		*nbSourceSymbols)
 {
+	*symbolSize = FEC_CHUNK_SIZE;
+	*nbSourceSymbols = (int)ceil((double)objectSize / (double)FEC_CHUNK_SIZE);
+	return LDPC_OK;
+
 	int	nbPkt;		// number of packet for this object
 	int	ss;		// optimal symbol size
 	nbPkt = (int)ceil((double)objectSize / (double)pktSize);
@@ -163,7 +167,8 @@ LDPCFecScheme::InitScheme  (int	symbolSize,
 		return LDPC_ERROR;
 	}
 
-	m_symbolSize = symbolSize;
+	if (symbolSize != FEC_CHUNK_SIZE)
+		return LDPC_ERROR;
 	m_pktSize = pktSize;
 
 	m_nbSymbolsPerPkt = (int) floor((double) m_pktSize/(double) m_symbolSize);
