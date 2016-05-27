@@ -151,6 +151,25 @@ BITCOIN_CORE_H = \
   zmq/zmqnotificationinterface.h \
   zmq/zmqpublishnotifier.h
 
+FEC_H = \
+  fec/ldpc_create_pchk.h \
+  fec/ldpc_fec.h \
+  fec/ldpc_matrix_sparse.h \
+  fec/ldpc_profile.h \
+  fec/ldpc_rand.h \
+  fec/ldpc_scheme.h \
+  fec/ldpc_types.h \
+  fec/macros.h \
+  fec/tools.h
+
+FEC_CPP = \
+  fec/ldpc_create_pchk.cpp \
+  fec/ldpc_fec.cpp \
+  fec/ldpc_fec_iterative_decoding.cpp \
+  fec/ldpc_matrix_sparse.cpp \
+  fec/ldpc_rand.cpp \
+  fec/ldpc_scheme.cpp \
+  fec/tools.cpp
 
 obj/build.h: FORCE
 	@$(MKDIR_P) $(builddir)/obj
@@ -195,6 +214,8 @@ libbitcoin_server_a_SOURCES = \
   ui_interface.cpp \
   validationinterface.cpp \
   versionbits.cpp \
+  $(FEC_CPP) \
+  $(FEC_H) \
   $(BITCOIN_CORE_H)
 
 if ENABLE_ZMQ
