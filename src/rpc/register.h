@@ -13,6 +13,8 @@ class CRPCTable;
 void RegisterBlockchainRPCCommands(CRPCTable &tableRPC);
 /** Register P2P networking RPC commands */
 void RegisterNetRPCCommands(CRPCTable &tableRPC);
+/** Register P2P UDP networking RPC commands */
+void RegisterUDPNetRPCCommands(CRPCTable &tableRPC);
 /** Register miscellaneous RPC commands */
 void RegisterMiscRPCCommands(CRPCTable &tableRPC);
 /** Register mining RPC commands */
@@ -24,6 +26,7 @@ static inline void RegisterAllCoreRPCCommands(CRPCTable &tableRPC)
 {
     RegisterBlockchainRPCCommands(tableRPC);
     RegisterNetRPCCommands(tableRPC);
+    RegisterUDPNetRPCCommands(tableRPC);
     RegisterMiscRPCCommands(tableRPC);
     RegisterMiningRPCCommands(tableRPC);
     RegisterRawTransactionRPCCommands(tableRPC);

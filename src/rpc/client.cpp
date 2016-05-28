@@ -25,6 +25,7 @@ public:
 static const CRPCConvertParam vRPCConvertParams[] =
 {
     { "stop", 0 },
+    { "addudpnode", 3 },
     { "setmocktime", 0 },
     { "getaddednodeinfo", 0 },
     { "generate", 0 },
