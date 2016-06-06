@@ -243,8 +243,6 @@ public:
         READWRITE(*const_cast<std::vector<CTxIn>*>(&vin));
         READWRITE(*const_cast<std::vector<CTxOut>*>(&vout));
         READWRITE(*const_cast<uint32_t*>(&nLockTime));
-        if (ser_action.ForRead())
-            UpdateHash();
     }
 
     bool IsNull() const {
@@ -252,6 +250,8 @@ public:
     }
 
     const uint256& GetHash() const {
+        if (hash.IsNull())
+            UpdateHash();
         return hash;
     }
 
