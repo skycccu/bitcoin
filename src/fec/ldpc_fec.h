@@ -607,6 +607,7 @@ LDPCFecSession::GetBufferPtrOnly	(void	*symbol)
 		return symbol;		// nothing to do here
 }
 
+#ifdef PERF_COUNT_XOR
 inline unsigned int
 LDPCFecSession::GetNbXor (void)
 {
@@ -618,5 +619,6 @@ LDPCFecSession::ResetNbXor (void)
 {
 	m_nbXor=0;
 }
+#endif // PERF_COUNT_XOR
 
 #endif /* } LDPC_FEC_H */

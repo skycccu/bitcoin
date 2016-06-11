@@ -97,6 +97,6 @@
  * The counter will not distinguish between 64-bit XORs (with 64-bit
  * architectures), 32-bit XORs, and 8-bit XORs.
  */
-#define PERF_COUNT_XOR
+//#define PERF_COUNT_XOR
 
 
