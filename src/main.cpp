@@ -30,6 +30,7 @@
 #include "tinyformat.h"
 #include "txdb.h"
 #include "txmempool.h"
+#include "udpnet.h"
 #include "ui_interface.h"
 #include "undo.h"
 #include "util.h"
@@ -3499,7 +3500,7 @@ bool ContextualCheckBlock(const CBlock& block, CValidationState& state, CBlockIn
     return true;
 }
 
-static bool AcceptBlockHeader(const CBlockHeader& block, CValidationState& state, const CChainParams& chainparams, CBlockIndex** ppindex=NULL)
+static bool AcceptBlockHeader(const CBlockHeader& block, CValidationState& state, const CChainParams& chainparams, CBlockIndex** ppindex=NULL, bool* fNew=NULL)
 {
     AssertLockHeld(cs_main);
     // Check for duplicate
@@ -3513,6 +3514,8 @@ static bool AcceptBlockHeader(const CBlockHeader& block, CValidationState& state
             pindex = miSelf->second;
             if (ppindex)
                 *ppindex = pindex;
+            if (fNew)
+                *fNew = !(pindex->nStatus & BLOCK_HAVE_DATA);
             if (pindex->nStatus & BLOCK_FAILED_MASK)
                 return state.Invalid(error("%s: block %s is marked invalid", __func__, hash.ToString()), 0, "duplicate");
             return true;
@@ -3536,7 +3539,11 @@ static bool AcceptBlockHeader(const CBlockHeader& block, CValidationState& state
 
         if (!ContextualCheckBlockHeader(block, state, chainparams.GetConsensus(), pindexPrev, GetAdjustedTime()))
             return error("%s: Consensus::ContextualCheckBlockHeader: %s, %s", __func__, hash.ToString(), FormatStateMessage(state));
-    }
+
+        if (fNew)
+            *fNew = true;
+    } else if (fNew)
+        *fNew = false;
     if (pindex == NULL)
         pindex = AddToBlockIndex(block);
 
@@ -3630,6 +3637,22 @@ bool ProcessNewBlock(CValidationState& state, const CChainParams& chainparams, C
 {
     {
         LOCK(cs_main);
+        CBlockIndex *pindex = NULL;
+        bool fNew = false;
+        // Do AcceptBlockHeader first, so that we can UDPRelayBlock before touching disk
+        bool ret = AcceptBlockHeader(*pblock, state, chainparams, &pindex, &fNew);
+        if (!ret) {
+            CheckBlockIndex(chainparams.GetConsensus());
+            return error("%s: AcceptBlock FAILED", __func__);
+        }
+
+        if (fNew && !IsInitialBlockDownload()) {
+            UDPRelayBlock(*pblock);
+            if (fLogIPs && pfrom)
+                LogPrint("bench", "Block %s provided by %s\n", pblock->GetHash().ToString(), pfrom->addr.ToString());
+        }
+
+    {
         bool fRequested = MarkBlockAsReceived(pblock->GetHash());
         fRequested |= fForceProcessing;
 
@@ -3644,6 +3667,7 @@ bool ProcessNewBlock(CValidationState& state, const CChainParams& chainparams, C
         CheckBlockIndex(chainparams.GetConsensus());
         if (!ret)
             return error("%s: AcceptBlock FAILED", __func__);
+    }
     }
 
     NotifyHeaderTip();
