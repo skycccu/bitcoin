@@ -438,6 +438,9 @@ bool CTxMemPool::addUnchecked(const uint256& hash, const CTxMemPoolEntry &entry,
     totalTxSize += entry.GetTxSize();
     minerPolicyEstimator->processTransaction(entry, fCurrentEstimate);
 
+    vTxHashes.emplace_back(hash, newit);
+    const_cast<CTxMemPoolEntry&>(*newit).vTxHashesIdx = vTxHashes.size() - 1;
+
     return true;
 }
 
@@ -446,6 +449,13 @@ void CTxMemPool::removeUnchecked(txiter it)
     const uint256 hash = it->GetTx().GetHash();
     BOOST_FOREACH(const CTxIn& txin, it->GetTx().vin)
         mapNextTx.erase(txin.prevout);
+
+    if (vTxHashes.size() > 1) {
+        vTxHashes[it->vTxHashesIdx] = std::move(vTxHashes[vTxHashes.size() - 1]);
+        const_cast<CTxMemPoolEntry&>(*(vTxHashes[it->vTxHashesIdx].second)).vTxHashesIdx = it->vTxHashesIdx;
+        vTxHashes.resize(vTxHashes.size() - 1);
+    } else
+        vTxHashes.clear();
 
     totalTxSize -= it->GetTxSize();
     cachedInnerUsage -= it->DynamicMemoryUsage();
