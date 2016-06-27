@@ -194,6 +194,8 @@ libbitcoin_server_a_SOURCES = \
   init.cpp \
   dbwrapper.cpp \
   main.cpp \
+  main_net.cpp \
+  main_mempool.cpp \
   merkleblock.cpp \
   miner.cpp \
   net.cpp \
