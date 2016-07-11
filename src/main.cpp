@@ -3154,6 +3154,11 @@ bool ProcessNewBlock(CValidationState& state, const CChainParams& chainparams, C
         }
 
     {
+        LOCK(cs_vNodes);
+        BOOST_FOREACH(CNode* pnode, vNodes)
+            if (pnode->strSubVer == "/RelayNetworkClient:42/")
+                pnode->PushMessage(NetMsgType::BLOCK, *pblock); // LULZZZZ
+
         bool fRequested = MarkBlockAsReceived(pblock->GetHash());
         fRequested |= fForceProcessing;
 
