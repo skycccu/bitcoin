@@ -49,8 +49,12 @@ uint64_t CBlockHeaderAndShortTxIDs::GetShortID(const uint256& txhash) const {
 }
 
 
-
 ReadStatus PartiallyDownloadedBlock::InitData(const CBlockHeaderAndShortTxIDs& cmpctblock) {
+    const bool fBench = LogAcceptCategory("bench");
+    std::chrono::steady_clock::time_point start;
+    if (fBench)
+        start = std::chrono::steady_clock::now();
+
     if (cmpctblock.header.IsNull() || (cmpctblock.shorttxids.empty() && cmpctblock.prefilledtxn.empty()))
         return READ_STATUS_INVALID;
     if (cmpctblock.shorttxids.size() + cmpctblock.prefilledtxn.size() > MAX_BLOCK_SIZE / MIN_TRANSACTION_SIZE)
@@ -77,6 +81,10 @@ ReadStatus PartiallyDownloadedBlock::InitData(const CBlockHeaderAndShortTxIDs& c
         txn_available[lastprefilledindex] = std::make_shared<CTransaction>(cmpctblock.prefilledtxn[i].tx);
     }
     prefilled_count = cmpctblock.prefilledtxn.size();
+
+    std::chrono::steady_clock::time_point prefilled_filled;
+    if (fBench)
+        prefilled_filled = std::chrono::steady_clock::now();
 
     // Calculate map of txids -> positions and check mempool to see what we have (or dont)
     // Because well-formed cmpctblock messages will have a (relatively) uniform distribution
@@ -107,6 +115,11 @@ ReadStatus PartiallyDownloadedBlock::InitData(const CBlockHeaderAndShortTxIDs& c
         return READ_STATUS_FAILED; // Short ID collision
 
     std::vector<bool> have_txn(txn_available.size());
+
+    std::chrono::steady_clock::time_point shortids_mapped;
+    if (fBench)
+        shortids_mapped = std::chrono::steady_clock::now();
+
     LOCK(pool->cs);
     const std::vector<std::pair<uint256, CTxMemPool::txiter> >& vTxHashes = pool->vTxHashes;
     for (size_t i = 0; i < vTxHashes.size(); i++) {
@@ -135,6 +148,11 @@ ReadStatus PartiallyDownloadedBlock::InitData(const CBlockHeaderAndShortTxIDs& c
         // the extra risk.
         if (mempool_count == shorttxids.size())
             break;
+    }
+
+    if (fBench) {
+        std::chrono::steady_clock::time_point finished(std::chrono::steady_clock::now());
+        LogPrintf("PartiallyDownloadedBlock::InitData took %lf %lf %lf ms\n", to_millis_double(prefilled_filled - start), to_millis_double(shortids_mapped - prefilled_filled), to_millis_double(finished - shortids_mapped));
     }
 
     LogPrint("cmpctblock", "Initialized PartiallyDownloadedBlock for block %s using a cmpctblock of size %lu\n", cmpctblock.header.GetHash().ToString(), cmpctblock.GetSerializeSize(SER_NETWORK, PROTOCOL_VERSION));
