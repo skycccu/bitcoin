@@ -124,7 +124,7 @@ void CZMQNotificationInterface::Shutdown()
     }
 }
 
-void CZMQNotificationInterface::UpdatedBlockTip(const CBlockIndex *pindex, bool fInitialDownload)
+void CZMQNotificationInterface::UpdatedBlockTip(const CBlockIndex *pindexNew, const CBlockIndex *pindexFork, bool fInitialDownload)
 {
     if (fInitialDownload)
         return;
@@ -132,7 +132,7 @@ void CZMQNotificationInterface::UpdatedBlockTip(const CBlockIndex *pindex, bool 
     for (std::list<CZMQAbstractNotifier*>::iterator i = notifiers.begin(); i!=notifiers.end(); )
     {
         CZMQAbstractNotifier *notifier = *i;
-        if (notifier->NotifyBlock(pindex))
+        if (notifier->NotifyBlock(pindexNew))
         {
             i++;
         }

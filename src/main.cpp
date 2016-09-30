@@ -3110,9 +3110,9 @@ bool ActivateBestChain(CValidationState &state, const CChainParams& chainparams,
                         }
                     });
                 }
-                // Notify external listeners about the new tip.
-                GetMainSignals().UpdatedBlockTip(pindexNewTip, fInitialDownload);
             }
+            // Notify external listeners about the new tip.
+            GetMainSignals().UpdatedBlockTip(pindexNewTip, pindexFork, fInitialDownload);
         }
     } while (pindexNewTip != pindexMostWork);
     CheckBlockIndex(chainparams.GetConsensus());
