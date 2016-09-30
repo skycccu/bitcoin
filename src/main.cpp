@@ -3041,7 +3041,6 @@ bool ActivateBestChain(CValidationState &state, const CChainParams& chainparams,
         const CBlockIndex *pindexFork;
         std::list<CTransaction> txConflicted;
         bool fInitialDownload;
-        int nNewHeight;
         {
             LOCK(cs_main);
             CBlockIndex *pindexOldTip = chainActive.Tip();
@@ -3064,7 +3063,6 @@ bool ActivateBestChain(CValidationState &state, const CChainParams& chainparams,
             pindexNewTip = chainActive.Tip();
             pindexFork = chainActive.FindFork(pindexOldTip);
             fInitialDownload = IsInitialBlockDownload();
-            nNewHeight = chainActive.Height();
         }
         // When we reach this point, we switched to a new tip (stored in pindexNewTip).
 
@@ -3082,35 +3080,8 @@ bool ActivateBestChain(CValidationState &state, const CChainParams& chainparams,
 
         // Always notify the UI if a new block tip was connected
         if (pindexFork != pindexNewTip) {
-            if(connman)
-                connman->SetBestHeight(nNewHeight);
-
             uiInterface.NotifyBlockTip(fInitialDownload, pindexNewTip);
 
-            if (!fInitialDownload) {
-                // Find the hashes of all blocks that weren't previously in the best chain.
-                std::vector<uint256> vHashes;
-                CBlockIndex *pindexToAnnounce = pindexNewTip;
-                while (pindexToAnnounce != pindexFork) {
-                    vHashes.push_back(pindexToAnnounce->GetBlockHash());
-                    pindexToAnnounce = pindexToAnnounce->pprev;
-                    if (vHashes.size() == MAX_BLOCKS_TO_ANNOUNCE) {
-                        // Limit announcements in case of a huge reorganization.
-                        // Rely on the peer's synchronization mechanism in that case.
-                        break;
-                    }
-                }
-                // Relay inventory, but don't relay old inventory during initial block download.
-                if(connman) {
-                    connman->ForEachNode([nNewHeight, &vHashes](CNode* pnode) {
-                        if (nNewHeight > (pnode->nStartingHeight != -1 ? pnode->nStartingHeight - 2000 : 0)) {
-                            BOOST_REVERSE_FOREACH(const uint256& hash, vHashes) {
-                                pnode->PushBlockHash(hash);
-                            }
-                        }
-                    });
-                }
-            }
             // Notify external listeners about the new tip.
             GetMainSignals().UpdatedBlockTip(pindexNewTip, pindexFork, fInitialDownload);
         }

@@ -10,6 +10,7 @@
 #include "net.h"
 
 #include "addrman.h"
+#include "chain.h"
 #include "chainparams.h"
 #include "clientversion.h"
 #include "consensus/consensus.h"
@@ -2460,6 +2461,37 @@ void CConnman::SetBestHeight(int height)
 int CConnman::GetBestHeight() const
 {
     return nBestHeight.load(std::memory_order_acquire);
+}
+
+
+void CConnman::UpdatedBlockTip(const CBlockIndex *pindexNew, const CBlockIndex *pindexFork, bool fInitialDownload)
+{
+    int nNewHeight = pindexNew->nHeight;
+    SetBestHeight(nNewHeight);
+
+    if (fInitialDownload)
+        return;
+
+    // Find the hashes of all blocks that weren't previously in the best chain.
+    std::vector<uint256> vHashes;
+    const CBlockIndex *pindexToAnnounce = pindexNew;
+    while (pindexToAnnounce != pindexFork) {
+        vHashes.push_back(pindexToAnnounce->GetBlockHash());
+        pindexToAnnounce = pindexToAnnounce->pprev;
+        if (vHashes.size() == 10) {
+            // Limit announcements in case of a huge reorganization.
+            // Rely on the peer's synchronization mechanism in that case.
+            break;
+        }
+    }
+    // Relay inventory, but don't relay old inventory during initial block download.
+    ForEachNode([nNewHeight, &vHashes](CNode* pnode) {
+        if (nNewHeight > (pnode->nStartingHeight != -1 ? pnode->nStartingHeight - 2000 : 0)) {
+            BOOST_REVERSE_FOREACH(const uint256& hash, vHashes) {
+                pnode->PushBlockHash(hash);
+            }
+        }
+    });
 }
 
 void CNode::Fuzz(int nChance)

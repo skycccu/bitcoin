@@ -19,6 +19,7 @@
 #include "streams.h"
 #include "sync.h"
 #include "uint256.h"
+#include "validationinterface.h"
 
 #include <atomic>
 #include <deque>
@@ -101,7 +102,7 @@ class CTransaction;
 class CNodeStats;
 class CClientUIInterface;
 
-class CConnman
+class CConnman : public CValidationInterface
 {
 public:
 
@@ -298,6 +299,8 @@ public:
 
     void SetBestHeight(int height);
     int GetBestHeight() const;
+
+    virtual void UpdatedBlockTip(const CBlockIndex *pindexNew, const CBlockIndex *pindexFork, bool fInitialDownload);
 
     /** Get a unique deterministic randomizer. */
     CSipHasher GetDeterministicRandomizer(uint64_t id);
