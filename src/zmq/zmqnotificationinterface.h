@@ -25,7 +25,7 @@ protected:
 
     // CValidationInterface
     void SyncTransaction(const CTransaction& tx, const CBlockIndex *pindex, int posInBlock);
-    void UpdatedBlockTip(const CBlockIndex *pindex);
+    void UpdatedBlockTip(const CBlockIndex *pindex, bool fInitialDownload);
 
 private:
     CZMQNotificationInterface();
