@@ -569,6 +569,8 @@ public:
     // TODO: Document the precondition of this function.  Is cs_vSend locked?
     void EndMessage(const char* pszCommand) UNLOCK_FUNCTION(cs_vSend);
 
+    void PushSerializedMessage(const char* pszCommand, const CDataStream& ssSendWithHeader);
+
     void PushVersion();
 
 

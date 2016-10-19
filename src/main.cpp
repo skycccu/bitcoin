@@ -3742,6 +3742,28 @@ static bool AcceptBlock(const CBlock& block, CValidationState& state, const CCha
         return AbortNode(state, std::string("System error: ") + e.what());
     }
 
+    // Header is valid/has work, merkle tree and segwit merkle tree are good...RELAY NOW
+    if (!IsInitialBlockDownload()) {
+        LOCK(cs_vNodes);
+        CDataStream ssSend(SER_NETWORK, INIT_PROTO_VERSION);
+        ssSend << CMessageHeader(Params().MessageStart(), NetMsgType::CMPCTBLOCK, 0);
+        ssSend << CBlockHeaderAndShortTxIDs(block, true);
+        unsigned int nSize = ssSend.size() - CMessageHeader::HEADER_SIZE;
+        WriteLE32((uint8_t*)&ssSend[CMessageHeader::MESSAGE_SIZE_OFFSET], nSize);
+
+        uint256 hash = Hash(ssSend.begin() + CMessageHeader::HEADER_SIZE, ssSend.end());
+        unsigned int nChecksum = 0;
+        memcpy(&nChecksum, &hash, sizeof(nChecksum));
+        assert(ssSend.size () >= CMessageHeader::CHECKSUM_OFFSET + sizeof(nChecksum));
+        memcpy((char*)&ssSend[CMessageHeader::CHECKSUM_OFFSET], &nChecksum, sizeof(nChecksum));
+
+        BOOST_FOREACH(CNode* pnode, vNodes) {
+            CNodeState &state = *State(pnode->GetId());
+            if (state.fPreferHeaderAndIDs && (!IsWitnessEnabled(pindex, chainparams.GetConsensus()) || state.fWantsCmpctWitness))
+                pnode->PushSerializedMessage(NetMsgType::CMPCTBLOCK, ssSend);
+        }
+    }
+
     if (fCheckForPruning)
         FlushStateToDisk(state, FLUSH_STATE_NONE); // we just allocated more disk space for block files
 

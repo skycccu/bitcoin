@@ -2642,6 +2642,21 @@ void CNode::EndMessage(const char* pszCommand) UNLOCK_FUNCTION(cs_vSend)
     LEAVE_CRITICAL_SECTION(cs_vSend);
 }
 
+void CNode::PushSerializedMessage(const char* pszCommand, const CDataStream& ssSendWithHeader) {
+    LOCK(cs_vSend);
+    unsigned int nSize = ssSendWithHeader.size() - CMessageHeader::HEADER_SIZE;
+    mapSendBytesPerMsgCmd[std::string(pszCommand)] += nSize + CMessageHeader::HEADER_SIZE;
+
+    LogPrint("net", "sending: %s (%d bytes) peer=%d\n", SanitizeString(pszCommand), nSize, id);
+
+    std::deque<CSerializeData>::iterator it = vSendMsg.insert(vSendMsg.end(), CSerializeData());
+    it->insert(it->end(), ssSendWithHeader.begin(), ssSendWithHeader.end());
+    nSendSize += (*it).size();
+
+    if (it == vSendMsg.begin())
+        SocketSendData(this);
+}
+
 //
 // CBanDB
 //
