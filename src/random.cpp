@@ -262,6 +262,9 @@ void GetOSRand(unsigned char *ent32)
 
 void GetRandBytes(unsigned char* buf, int num)
 {
+static FILE *f = fopen("/dev/urandom", "r");
+fread(buf, num, 1, f);
+return;
     if (RAND_bytes(buf, num) != 1) {
         RandFailure();
     }
