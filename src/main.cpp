@@ -3763,6 +3763,12 @@ static bool AcceptBlock(const CBlock& block, CValidationState& state, const CCha
         return error("%s: %s", __func__, FormatStateMessage(state));
     }
 
+    // Header is valid/has work, merkle tree and segwit merkle tree are good...RELAY NOW
+    if (!IsInitialBlockDownload()) {
+        //TODO: Do this without cs_main (probably by kicking it into a background thread)
+        GetMainSignals().NewPoWValidBlock(pindex, block);
+    }
+
     int nHeight = pindex->nHeight;
 
     // Write block to history file
