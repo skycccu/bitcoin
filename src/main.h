@@ -562,6 +562,7 @@ public:
 
     virtual void UpdatedBlockTip(const CBlockIndex *pindexNew, const CBlockIndex *pindexFork, bool fInitialDownload);
     virtual void BlockChecked(const CBlock& block, const CValidationState& state);
+    virtual void NewPoWValidBlock(const CBlockIndex *pindex, const CBlock& block);
 };
 
 struct CNodeStateStats {

@@ -4750,6 +4750,19 @@ PeerLogicValidation::PeerLogicValidation(CConnman* connmanIn) : connman(connmanI
     recentRejects.reset(new CRollingBloomFilter(120000, 0.000001));
 }
 
+void PeerLogicValidation::NewPoWValidBlock(const CBlockIndex *pindex, const CBlock& block) {
+    CBlockHeaderAndShortTxIDs cmpctblock(block, true);
+
+    connman->ForEachNode([this, &cmpctblock, &pindex](CNode* pnode) {
+        // TODO: Avoid the repeated-serialization here
+        if (pnode->nVersion < INVALID_CB_NO_BAN_VERSION)
+            return;
+        CNodeState &state = *State(pnode->GetId());
+        if (state.fPreferHeaderAndIDs && (!IsWitnessEnabled(pindex, Params().GetConsensus()) || state.fWantsCmpctWitness))
+            connman->PushMessage(pnode, NetMsgType::CMPCTBLOCK, cmpctblock);
+    });
+}
+
 void PeerLogicValidation::UpdatedBlockTip(const CBlockIndex *pindexNew, const CBlockIndex *pindexFork, bool fInitialDownload) {
     const int nNewHeight = pindexNew->nHeight;
     connman->SetBestHeight(nNewHeight);
