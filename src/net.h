@@ -549,6 +549,8 @@ public:
     uint64_t nRecvBytes;
     std::atomic<int> nRecvVersion;
 
+    CCriticalSection cs_processing; // Used only in ThreadMessageHandler
+
     std::atomic<int64_t> nLastSend;
     std::atomic<int64_t> nLastRecv;
     const int64_t nTimeConnected;
