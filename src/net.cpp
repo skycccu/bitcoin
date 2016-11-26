@@ -2174,7 +2174,8 @@ bool CConnman::Start(boost::thread_group& threadGroup, CScheduler& scheduler, st
         threadGroup.create_thread(boost::bind(&TraceThread<boost::function<void()> >, "opencon", boost::function<void()>(boost::bind(&CConnman::ThreadOpenConnections, this))));
 
     // Process messages
-    threadGroup.create_thread(boost::bind(&TraceThread<boost::function<void()> >, "msghand", boost::function<void()>(boost::bind(&CConnman::ThreadMessageHandler, this))));
+    threadGroup.create_thread(boost::bind(&TraceThread<boost::function<void()> >, "msghand1", boost::function<void()>(boost::bind(&CConnman::ThreadMessageHandler, this))));
+    threadGroup.create_thread(boost::bind(&TraceThread<boost::function<void()> >, "msghand2", boost::function<void()>(boost::bind(&CConnman::ThreadMessageHandler, this))));
 
     // Dump network addresses
     scheduler.scheduleEvery(boost::bind(&CConnman::DumpData, this), DUMP_ADDRESSES_INTERVAL);
