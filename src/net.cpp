@@ -1847,6 +1847,9 @@ void CConnman::ThreadMessageHandler()
 
         bool fSleep = true;
 
+        static std::atomic_flag main_thread_running;
+        bool fAvoidLocks = main_thread_running.test_and_set();
+
         BOOST_FOREACH(CNode* pnode, vNodesCopy)
         {
             if (pnode->fDisconnect)
@@ -1861,7 +1864,7 @@ void CConnman::ThreadMessageHandler()
                 TRY_LOCK(pnode->cs_vRecvMsg, lockRecv);
                 if (lockRecv)
                 {
-                    if (!GetNodeSignals().ProcessMessages(pnode, *this))
+                    if (!GetNodeSignals().ProcessMessages(pnode, *this, fAvoidLocks))
                         pnode->CloseSocketDisconnect();
 
                     if (pnode->nSendSize < GetSendBufferSize())
@@ -1884,6 +1887,9 @@ void CConnman::ThreadMessageHandler()
             boost::this_thread::interruption_point();
         }
 
+        if (!fAvoidLocks)
+            main_thread_running.clear();
+
         {
             LOCK(cs_vNodes);
             BOOST_FOREACH(CNode* pnode, vNodesCopy)
@@ -1891,7 +1897,7 @@ void CConnman::ThreadMessageHandler()
         }
 
         if (fSleep)
-            messageHandlerCondition.timed_wait(lock, boost::posix_time::microsec_clock::universal_time() + boost::posix_time::milliseconds(100));
+            messageHandlerCondition.timed_wait(lock, boost::posix_time::microsec_clock::universal_time() + boost::posix_time::milliseconds(fAvoidLocks ? 1 : 100));
     }
 }
 

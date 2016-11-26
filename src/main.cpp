@@ -6367,7 +6367,7 @@ bool static ProcessMessage(CNode* pfrom, string strCommand, CDataStream& vRecv, 
 }
 
 // requires LOCK(cs_vRecvMsg)
-bool ProcessMessages(CNode* pfrom, CConnman& connman)
+bool ProcessMessages(CNode* pfrom, CConnman& connman, bool fAvoidLocking)
 {
     const CChainParams& chainparams = Params();
     unsigned int nMaxSendBufferSize = connman.GetSendBufferSize();
@@ -6426,6 +6426,18 @@ bool ProcessMessages(CNode* pfrom, CConnman& connman)
             continue;
         }
         string strCommand = hdr.GetCommand();
+
+        // There is no harm in getting this wrong, just we might not get good concurrency
+        if (fAvoidLocking &&
+                strCommand != NetMsgType::GETADDR &&
+                strCommand != NetMsgType::MEMPOOL &&
+                strCommand != NetMsgType::PING &&
+                strCommand != NetMsgType::PONG &&
+                strCommand != NetMsgType::REJECT &&
+                strCommand != NetMsgType::FEEFILTER) {
+            it--;
+            break;
+        }
 
         // Message size
         unsigned int nMessageSize = hdr.nMessageSize;
