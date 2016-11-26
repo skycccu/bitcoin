@@ -1852,6 +1852,10 @@ void CConnman::ThreadMessageHandler()
             if (pnode->fDisconnect)
                 continue;
 
+            TRY_LOCK(pnode->cs_processing, lockProcessing);
+            if (!lockProcessing)
+                continue;
+
             // Receive messages
             {
                 TRY_LOCK(pnode->cs_vRecvMsg, lockRecv);
