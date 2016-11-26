@@ -92,6 +92,8 @@ static const unsigned int DEFAULT_MISBEHAVING_BANTIME = 60 * 60 * 24;  // Defaul
 
 typedef int64_t NodeId;
 
+static const int DEFAULT_MESSAGE_HANDLER_THREADS = 2; // Too much cs_main for any more to be useful
+
 struct AddedNodeInfo
 {
     std::string strAddedNode;
@@ -362,7 +364,7 @@ private:
     std::thread threadSocketHandler;
     std::thread threadOpenAddedConnections;
     std::thread threadOpenConnections;
-    std::thread threadMessageHandler;
+    std::list<std::thread> threadMessageHandlers;
 };
 extern std::unique_ptr<CConnman> g_connman;
 void Discover(boost::thread_group& threadGroup);
