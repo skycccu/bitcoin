@@ -1847,8 +1847,8 @@ void CConnman::ThreadMessageHandler()
 
         bool fSleep = true;
 
-        static std::atomic_flag main_thread_running;
-        bool fAvoidLocks = main_thread_running.test_and_set();
+        static std::atomic_bool main_thread_running(false);
+        bool fAvoidLocks = main_thread_running.exchange(true);
 
         BOOST_FOREACH(CNode* pnode, vNodesCopy)
         {
@@ -1887,8 +1887,18 @@ void CConnman::ThreadMessageHandler()
             boost::this_thread::interruption_point();
         }
 
-        if (!fAvoidLocks)
-            main_thread_running.clear();
+        static std::atomic_bool work_to_do(false);
+        if (!fSleep && fAvoidLocks) {
+            work_to_do = true;
+            if (main_thread_running)
+                fSleep = true;
+        }
+
+        if (!fAvoidLocks) {
+            main_thread_running = false;
+            if (work_to_do.exchange(false))
+                fSleep = false;
+        }
 
         {
             LOCK(cs_vNodes);
@@ -1897,7 +1907,7 @@ void CConnman::ThreadMessageHandler()
         }
 
         if (fSleep)
-            messageHandlerCondition.timed_wait(lock, boost::posix_time::microsec_clock::universal_time() + boost::posix_time::milliseconds(fAvoidLocks ? 1 : 100));
+            messageHandlerCondition.timed_wait(lock, boost::posix_time::microsec_clock::universal_time() + boost::posix_time::milliseconds(1000));
     }
 }
 
