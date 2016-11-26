@@ -611,6 +611,9 @@ void CConnman::AddWhitelistedRange(const CSubNet &subnet) {
 #define X(name) stats.name = name
 void CNode::copyStats(CNodeStats &stats)
 {
+    if (this->nVersion == 0)
+        return;
+
     stats.nodeid = this->GetId();
     X(nServices);
     X(addr);
@@ -624,10 +627,16 @@ void CNode::copyStats(CNodeStats &stats)
     X(cleanSubVer);
     X(fInbound);
     X(nStartingHeight);
-    X(nSendBytes);
-    X(mapSendBytesPerMsgCmd);
-    X(nRecvBytes);
-    X(mapRecvBytesPerMsgCmd);
+    {
+        LOCK(cs_vSend);
+        X(nSendBytes);
+        X(mapSendBytesPerMsgCmd);
+    }
+    {
+        LOCK(cs_vRecvMsg);
+        X(nRecvBytes);
+        X(mapRecvBytesPerMsgCmd);
+    }
     X(fWhitelisted);
 
     // It is common for nodes with good ping times to suddenly become lagged,
@@ -2306,14 +2315,21 @@ size_t CConnman::GetNodeCount(NumConnections flags)
 void CConnman::GetNodeStats(std::vector<CNodeStats>& vstats)
 {
     vstats.clear();
-    LOCK(cs_vNodes);
-    vstats.reserve(vNodes.size());
-    for(std::vector<CNode*>::iterator it = vNodes.begin(); it != vNodes.end(); ++it) {
-        CNode* pnode = *it;
+    std::vector<CNode*> vNodesCopy;
+    {
+        LOCK(cs_vNodes);
+        vstats.reserve(vNodes.size());
+        vNodesCopy = vNodes;
+        for (CNode* pnode : vNodesCopy)
+            pnode->AddRef();
+    }
+    for (CNode* pnode : vNodesCopy) {
         CNodeStats stats;
         pnode->copyStats(stats);
         vstats.push_back(stats);
     }
+    for (CNode* pnode : vNodesCopy)
+        pnode->Release();
 }
 
 bool CConnman::DisconnectAddress(const CNetAddr& netAddr)

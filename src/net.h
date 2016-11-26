@@ -580,10 +580,10 @@ class CNode
     friend class CConnman;
 public:
     // socket
-    ServiceFlags nServices;
+    std::atomic<ServiceFlags> nServices;
     ServiceFlags nServicesExpected;
     SOCKET hSocket;
-    size_t nSendSize; // total size of all vSendMsg entries
+    std::atomic<size_t> nSendSize; // total size of all vSendMsg entries
     size_t nSendOffset; // offset inside the first vSendMsg already sent
     uint64_t nSendBytes;
     std::deque<std::vector<unsigned char>> vSendMsg;
@@ -595,21 +595,21 @@ public:
     uint64_t nRecvBytes;
     int nRecvVersion;
 
-    int64_t nLastSend;
-    int64_t nLastRecv;
-    int64_t nTimeConnected;
-    int64_t nTimeOffset;
+    std::atomic<int64_t> nLastSend;
+    std::atomic<int64_t> nLastRecv;
+    std::atomic<int64_t> nTimeConnected;
+    std::atomic<int64_t> nTimeOffset;
     const CAddress addr;
     std::string addrName;
     CService addrLocal;
-    int nVersion;
+    std::atomic_int nVersion;
     // strSubVer is whatever byte array we read from the wire. However, this field is intended
     // to be printed out, displayed to humans in various forms and so on. So we sanitize it and
     // store the sanitized version in cleanSubVer. The original should be used when dealing with
     // the network or wire types and the cleaned string used when displayed or logged.
     std::string strSubVer, cleanSubVer;
-    bool fWhitelisted; // This peer can bypass DoS banning.
-    bool fFeeler; // If true this node is being used as a short lived feeler.
+    std::atomic_bool fWhitelisted; // This peer can bypass DoS banning.
+    std::atomic_bool fFeeler; // If true this node is being used as a short lived feeler.
     bool fOneShot;
     bool fClient;
     const bool fInbound;
@@ -618,12 +618,12 @@ public:
     // a) it allows us to not relay tx invs before receiving the peer's version message
     // b) the peer may tell us in its version message that we should not relay tx invs
     //    unless it loads a bloom filter.
-    bool fRelayTxes; //protected by cs_filter
+    std::atomic_bool fRelayTxes; //protected by cs_filter
     bool fSentAddr;
     CSemaphoreGrant grantOutbound;
     CCriticalSection cs_filter;
     CBloomFilter* pfilter;
-    int nRefCount;
+    std::atomic_int nRefCount;
     const NodeId id;
 
     const uint64_t nKeyedNetGroup;
@@ -634,7 +634,7 @@ protected:
 
 public:
     uint256 hashContinue;
-    int nStartingHeight;
+    std::atomic_int nStartingHeight;
 
     // flood relay
     std::vector<CAddress> vAddrToSend;
@@ -672,13 +672,13 @@ public:
 
     // Ping time measurement:
     // The pong reply we're expecting, or 0 if no pong expected.
-    uint64_t nPingNonceSent;
+    std::atomic<uint64_t> nPingNonceSent;
     // Time (in usec) the last ping was sent, or 0 if no ping was ever sent.
-    int64_t nPingUsecStart;
+    std::atomic<int64_t> nPingUsecStart;
     // Last measured round-trip time.
-    int64_t nPingUsecTime;
+    std::atomic<int64_t> nPingUsecTime;
     // Best measured round-trip time.
-    int64_t nMinPingUsecTime;
+    std::atomic<int64_t> nMinPingUsecTime;
     // Whether a ping is requested.
     bool fPingQueued;
     // Minimum fee rate with which to filter inv's to this node
@@ -822,6 +822,7 @@ public:
 
     void CloseSocketDisconnect();
 
+    // Must be called with no(!) locks held
     void copyStats(CNodeStats &stats);
 
     ServiceFlags GetLocalServices() const

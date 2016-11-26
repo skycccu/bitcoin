@@ -5130,13 +5130,17 @@ bool static ProcessMessage(CNode* pfrom, string strCommand, CDataStream& vRecv, 
             pfrom->cleanSubVer = SanitizeString(pfrom->strSubVer);
         }
         if (!vRecv.empty()) {
-            vRecv >> pfrom->nStartingHeight;
+            int nStartingHeight;
+            vRecv >> nStartingHeight;
+            pfrom->nStartingHeight = nStartingHeight;
         }
         {
             LOCK(pfrom->cs_filter);
-            if (!vRecv.empty())
-                vRecv >> pfrom->fRelayTxes; // set to true after we get the first filter* message
-            else
+            if (!vRecv.empty()) {
+                bool fRelayTxes;
+                vRecv >> fRelayTxes; // set to true after we get the first filter* message
+                pfrom->fRelayTxes = fRelayTxes;
+            } else
                 pfrom->fRelayTxes = true;
         }
 
@@ -5240,7 +5244,7 @@ bool static ProcessMessage(CNode* pfrom, string strCommand, CDataStream& vRecv, 
 
     if (strCommand == NetMsgType::VERACK)
     {
-        pfrom->SetRecvVersion(min(pfrom->nVersion, PROTOCOL_VERSION));
+        pfrom->SetRecvVersion(min(pfrom->nVersion.load(), PROTOCOL_VERSION));
 
         if (!pfrom->fInbound) {
             // Mark this node as currently connected, so we update its timestamp later.
@@ -6216,7 +6220,7 @@ bool static ProcessMessage(CNode* pfrom, string strCommand, CDataStream& vRecv, 
                     if (pingUsecTime > 0) {
                         // Successful ping time measurement, replace previous
                         pfrom->nPingUsecTime = pingUsecTime;
-                        pfrom->nMinPingUsecTime = std::min(pfrom->nMinPingUsecTime, pingUsecTime);
+                        pfrom->nMinPingUsecTime = std::min(pfrom->nMinPingUsecTime.load(), pingUsecTime);
                     } else {
                         // This should never happen
                         sProblem = "Timing mishap";
