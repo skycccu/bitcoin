@@ -16,10 +16,6 @@
 #include "util.h"
 #include "utilstrencodings.h"
 
-#ifdef HAVE_GETADDRINFO_A
-#include <netdb.h>
-#endif
-
 #ifndef WIN32
 #if HAVE_INET_PTON
 #include <arpa/inet.h>
@@ -94,7 +90,6 @@ bool static LookupIntern(const char *pszName, std::vector<CNetAddr>& vIP, unsign
         }
     }
 
-#ifdef HAVE_GETADDRINFO_A
     struct in_addr ipv4_addr;
 #ifdef HAVE_INET_PTON
     if (inet_pton(AF_INET, pszName, &ipv4_addr) > 0) {
@@ -114,7 +109,6 @@ bool static LookupIntern(const char *pszName, std::vector<CNetAddr>& vIP, unsign
         return true;
     }
 #endif
-#endif
 
     struct addrinfo aiHint;
     memset(&aiHint, 0, sizeof(struct addrinfo));
@@ -128,31 +122,7 @@ bool static LookupIntern(const char *pszName, std::vector<CNetAddr>& vIP, unsign
 #endif
 
     struct addrinfo *aiRes = NULL;
-#ifdef HAVE_GETADDRINFO_A
-    struct gaicb gcb, *query = &gcb;
-    memset(query, 0, sizeof(struct gaicb));
-    gcb.ar_name = pszName;
-    gcb.ar_request = &aiHint;
-    int nErr = getaddrinfo_a(GAI_NOWAIT, &query, 1, NULL);
-    if (nErr)
-        return false;
-
-    do {
-        // Should set the timeout limit to a reasonable value to avoid
-        // generating unnecessary checking call during the polling loop,
-        // while it can still response to stop request quick enough.
-        // 2 seconds looks fine in our situation.
-        struct timespec ts = { 2, 0 };
-        gai_suspend(&query, 1, &ts);
-        boost::this_thread::interruption_point();
-
-        nErr = gai_error(query);
-        if (0 == nErr)
-            aiRes = query->ar_result;
-    } while (nErr == EAI_INPROGRESS);
-#else
     int nErr = getaddrinfo(pszName, NULL, &aiHint, &aiRes);
-#endif
     if (nErr)
         return false;
 
