@@ -15,6 +15,7 @@
 #include <map>
 #include <string>
 #include <vector>
+#include <atomic>
 
 #include <boost/filesystem/path.hpp>
 
@@ -23,7 +24,7 @@
 static const unsigned int DEFAULT_WALLET_DBLOGSIZE = 100;
 static const bool DEFAULT_WALLET_PRIVDB = true;
 
-extern unsigned int nWalletDBUpdated;
+extern std::atomic<unsigned int> nWalletDBUpdated;
 
 class CDBEnv
 {
