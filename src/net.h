@@ -613,7 +613,6 @@ public:
     bool fOneShot;
     bool fClient;
     const bool fInbound;
-    bool fSuccessfullyConnected;
     std::atomic_bool fDisconnect;
     // We use fRelayTxes for two purposes -
     // a) it allows us to not relay tx invs before receiving the peer's version message
