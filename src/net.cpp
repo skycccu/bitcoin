@@ -174,7 +174,7 @@ bool IsPeerAddrLocalGood(CNode *pnode)
 // pushes our own address to a peer
 void AdvertiseLocal(CNode *pnode)
 {
-    if (fListen && pnode->fSuccessfullyConnected)
+    if (fListen && pnode->nVersion != 0)
     {
         CAddress addrLocal = GetLocalAddress(&pnode->addr, pnode->GetLocalServices());
         // If discovery is enabled, sometimes give our peer the address it
@@ -329,7 +329,7 @@ bool CConnman::CheckIncomingNonce(uint64_t nonce)
 {
     LOCK(cs_vNodes);
     BOOST_FOREACH(CNode* pnode, vNodes) {
-        if (!pnode->fSuccessfullyConnected && !pnode->fInbound && pnode->GetLocalNonce() == nonce)
+        if (pnode->nVersion == 0 && !pnode->fInbound && pnode->GetLocalNonce() == nonce)
             return false;
     }
     return true;
@@ -1471,7 +1471,7 @@ void CConnman::ThreadDNSAddressSeed()
         LOCK(cs_vNodes);
         int nRelevant = 0;
         for (auto pnode : vNodes) {
-            nRelevant += pnode->fSuccessfullyConnected && ((pnode->nServices & nRelevantServices) == nRelevantServices);
+            nRelevant += (pnode->nVersion != 0) && ((pnode->nServices & nRelevantServices) == nRelevantServices);
         }
         if (nRelevant >= 2) {
             LogPrintf("P2P peers available. Skipped DNS seeding.\n");
@@ -2532,7 +2532,6 @@ CNode::CNode(NodeId idIn, ServiceFlags nLocalServicesIn, int nMyStartingHeightIn
     fClient = false; // set by version message
     fFeeler = false;
     fNetworkNode = false;
-    fSuccessfullyConnected = false;
     fDisconnect = false;
     nRefCount = 0;
     nSendSize = 0;
