@@ -2582,6 +2582,33 @@ void CNode::PushAddress(const CAddress& _addr, FastRandomContext &insecure_rand)
     }
 }
 
+
+void CNode::AddInventoryKnown(const CInv& inv)
+{
+    {
+        LOCK(cs_inventory);
+        filterInventoryKnown.insert(inv.hash);
+    }
+}
+
+void CNode::PushInventory(const CInv& inv)
+{
+    LOCK(cs_inventory);
+    if (inv.type == MSG_TX) {
+        if (!filterInventoryKnown.contains(inv.hash)) {
+            setInventoryTxToSend.insert(inv.hash);
+        }
+    } else if (inv.type == MSG_BLOCK) {
+        vInventoryBlockToSend.push_back(inv.hash);
+    }
+}
+
+void CNode::PushBlockHash(const uint256 &hash)
+{
+    LOCK(cs_inventory);
+    vBlockHashesToAnnounce.push_back(hash);
+}
+
 void CNode::AskFor(const CInv& inv)
 {
     if (mapAskFor.size() > MAPASKFOR_MAX_SZ || setAskFor.size() > SETASKFOR_MAX_SZ)

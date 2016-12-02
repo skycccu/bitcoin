@@ -783,31 +783,11 @@ public:
     void PushAddress(const CAddress& _addr, FastRandomContext &insecure_rand);
 
 
-    void AddInventoryKnown(const CInv& inv)
-    {
-        {
-            LOCK(cs_inventory);
-            filterInventoryKnown.insert(inv.hash);
-        }
-    }
+    void AddInventoryKnown(const CInv& inv);
 
-    void PushInventory(const CInv& inv)
-    {
-        LOCK(cs_inventory);
-        if (inv.type == MSG_TX) {
-            if (!filterInventoryKnown.contains(inv.hash)) {
-                setInventoryTxToSend.insert(inv.hash);
-            }
-        } else if (inv.type == MSG_BLOCK) {
-            vInventoryBlockToSend.push_back(inv.hash);
-        }
-    }
+    void PushInventory(const CInv& inv);
 
-    void PushBlockHash(const uint256 &hash)
-    {
-        LOCK(cs_inventory);
-        vBlockHashesToAnnounce.push_back(hash);
-    }
+    void PushBlockHash(const uint256 &hash);
 
     void AskFor(const CInv& inv);
 
