@@ -12,10 +12,8 @@
 #include "bloom.h"
 #include "compat.h"
 #include "hash.h"
-#include "limitedmap.h"
 #include "netaddress.h"
 #include "protocol.h"
-#include "random.h"
 #include "streams.h"
 #include "sync.h"
 #include "uint256.h"
@@ -30,12 +28,16 @@
 #endif
 
 #include <boost/filesystem/path.hpp>
-#include <boost/foreach.hpp>
 #include <boost/signals2/signal.hpp>
 
 class CAddrMan;
+class CBloomFilter;
 class CScheduler;
 class CNode;
+class FastRandomContext;
+
+template <typename K, typename V>
+class limitedmap;
 
 namespace boost {
     class thread_group;
@@ -725,7 +727,7 @@ public:
     unsigned int GetTotalRecvSize()
     {
         unsigned int total = 0;
-        BOOST_FOREACH(const CNetMessage &msg, vRecvMsg)
+        for (const CNetMessage &msg : vRecvMsg)
             total += msg.vRecv.size() + 24;
         return total;
     }
@@ -737,7 +739,7 @@ public:
     void SetRecvVersion(int nVersionIn)
     {
         nRecvVersion = nVersionIn;
-        BOOST_FOREACH(CNetMessage &msg, vRecvMsg)
+        for (CNetMessage &msg : vRecvMsg)
             msg.SetVersion(nVersionIn);
     }
     void SetSendVersion(int nVersionIn)
@@ -778,19 +780,7 @@ public:
         addrKnown.insert(_addr.GetKey());
     }
 
-    void PushAddress(const CAddress& _addr, FastRandomContext &insecure_rand)
-    {
-        // Known checking here is only to save space from duplicates.
-        // SendMessages will filter it again for knowns that were added
-        // after addresses were pushed.
-        if (_addr.IsValid() && !addrKnown.contains(_addr.GetKey())) {
-            if (vAddrToSend.size() >= MAX_ADDR_TO_SEND) {
-                vAddrToSend[insecure_rand.rand32() % vAddrToSend.size()] = _addr;
-            } else {
-                vAddrToSend.push_back(_addr);
-            }
-        }
-    }
+    void PushAddress(const CAddress& _addr, FastRandomContext &insecure_rand);
 
 
     void AddInventoryKnown(const CInv& inv)

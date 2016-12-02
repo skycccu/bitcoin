@@ -17,7 +17,9 @@
 #include "crypto/sha256.h"
 #include "hash.h"
 #include "primitives/transaction.h"
+#include "limitedmap.h"
 #include "netbase.h"
+#include "random.h"
 #include "scheduler.h"
 #include "ui_interface.h"
 #include "utilstrencodings.h"
@@ -2563,6 +2565,20 @@ CNode::~CNode()
 
     if (pfilter)
         delete pfilter;
+}
+
+void CNode::PushAddress(const CAddress& _addr, FastRandomContext &insecure_rand)
+{
+    // Known checking here is only to save space from duplicates.
+    // SendMessages will filter it again for knowns that were added
+    // after addresses were pushed.
+    if (_addr.IsValid() && !addrKnown.contains(_addr.GetKey())) {
+        if (vAddrToSend.size() >= MAX_ADDR_TO_SEND) {
+            vAddrToSend[insecure_rand.rand32() % vAddrToSend.size()] = _addr;
+        } else {
+            vAddrToSend.push_back(_addr);
+        }
+    }
 }
 
 void CNode::AskFor(const CInv& inv)

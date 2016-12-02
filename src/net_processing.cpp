@@ -13,6 +13,7 @@
 #include "hash.h"
 #include "init.h"
 #include "validation.h"
+#include "limitedmap.h"
 #include "merkleblock.h"
 #include "net.h"
 #include "netmessagemaker.h"
