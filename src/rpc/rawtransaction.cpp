@@ -12,7 +12,7 @@
 #include "keystore.h"
 #include "validation.h"
 #include "merkleblock.h"
-#include "net.h"
+#include "test.h"
 #include "policy/policy.h"
 #include "primitives/transaction.h"
 #include "rpc/server.h"
@@ -918,10 +918,7 @@ UniValue sendrawtransaction(const JSONRPCRequest& request)
         throw JSONRPCError(RPC_CLIENT_P2P_DISABLED, "Error: Peer-to-peer functionality missing or disabled");
 
     CInv inv(MSG_TX, hashTx);
-    g_connman->ForEachNode([&inv](CNode* pnode)
-    {
-        pnode->PushInventory(inv);
-    });
+    PushInvPerNode(inv);
     return hashTx.GetHex();
 }
 
