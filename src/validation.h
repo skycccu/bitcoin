@@ -18,9 +18,6 @@
 #include "sync.h"
 #include "versionbits.h"
 
-#include <algorithm>
-#include <exception>
-#include <map>
 #include <set>
 #include <stdint.h>
 #include <string>
