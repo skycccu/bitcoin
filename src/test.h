@@ -2,5 +2,5 @@
 #define BITCOIN_TEST_H
 class CInv;
 
-void PushInvPerNode(const CInv& inv);
+bool PushInvPerNode(const CInv& inv);
 #endif

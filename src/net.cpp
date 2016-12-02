@@ -2667,10 +2667,13 @@ uint64_t CConnman::CalculateKeyedNetGroup(const CAddress& ad)
 }
 
 
-void PushInvPerNode(const CInv& inv)
+bool PushInvPerNode(const CInv& inv)
 {
+    if (!g_connman)
+        return false;
     g_connman->ForEachNode([&inv](CNode* pnode)
     {
         pnode->PushInventory(inv);
     });
+    return true;
 }
