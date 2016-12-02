@@ -38,6 +38,7 @@
 #endif
 
 #include <boost/filesystem.hpp>
+#include <boost/foreach.hpp>
 #include <boost/thread.hpp>
 
 #include <math.h>
