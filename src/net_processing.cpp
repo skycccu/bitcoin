@@ -40,8 +40,6 @@ using namespace std;
 
 int64_t nTimeBestReceived = 0; // Used only to inform the wallet of when we last received a block
 
-FeeFilterRounder filterRounder(::minRelayTxFee);
-
 struct IteratorComparator
 {
     template<typename I>
@@ -2997,6 +2995,7 @@ bool SendMessages(CNode* pto, CConnman& connman)
             CAmount currentFilter = mempool.GetMinFee(GetArg("-maxmempool", DEFAULT_MAX_MEMPOOL_SIZE) * 1000000).GetFeePerK();
             int64_t timeNow = GetTimeMicros();
             if (timeNow > pto->nextSendTimeFeeFilter) {
+                static FeeFilterRounder filterRounder(::minRelayTxFee);
                 CAmount filterToSend = filterRounder.round(currentFilter);
                 if (filterToSend != pto->lastSentFeeFilter) {
                     connman.PushMessage(pto, msgMaker.Make(NetMsgType::FEEFILTER, filterToSend));
