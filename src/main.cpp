@@ -3759,8 +3759,11 @@ static bool AcceptBlock(const CBlock& block, CValidationState& state, const CCha
 
         BOOST_FOREACH(CNode* pnode, vNodes) {
             CNodeState &state = *State(pnode->GetId());
-            if (state.fPreferHeaderAndIDs && (!IsWitnessEnabled(pindex, chainparams.GetConsensus()) || state.fWantsCmpctWitness))
+            if (state.fPreferHeaderAndIDs && (!IsWitnessEnabled(pindex, chainparams.GetConsensus()) || state.fWantsCmpctWitness) &&
+                    !PeerHasHeader(&state, pindex) && PeerHasHeader(&state, pindex->pprev)) {
                 pnode->PushSerializedMessage(NetMsgType::CMPCTBLOCK, ssSend);
+                state.pindexBestHeaderSent = pindex;
+            }
         }
     }
 
