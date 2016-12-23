@@ -224,15 +224,41 @@ struct CNodeState {
     }
 };
 
-/** Map maintaining per-node state. Requires cs_main. */
-std::map<NodeId, CNodeState> mapNodeState;
+class NodeStateStorage {
+    /** Map maintaining per-node state. Requires cs_main. */
+    std::map<NodeId, CNodeState> m_mapNodeState;
+
+public:
+    CNodeState *GetNodeState(NodeId nodeid) {
+        AssertLockHeld(cs_main);
+        std::map<NodeId, CNodeState>::iterator it = m_mapNodeState.find(nodeid);
+        if (it == m_mapNodeState.end())
+            return NULL;
+        return &it->second;
+    }
+
+    void AddStateForNode(NodeId nodeid, const CAddress& addr, std::string addrName) {
+        LOCK(cs_main);
+        m_mapNodeState.emplace_hint(m_mapNodeState.end(), std::piecewise_construct, std::forward_as_tuple(nodeid), std::forward_as_tuple(addr, std::move(addrName)));
+    }
+
+    void RemoveStateForNode(NodeId nodeid) {
+        LOCK(cs_main);
+
+        m_mapNodeState.erase(nodeid);
+
+        if (m_mapNodeState.empty()) {
+            // Do a consistency check after the last peer is removed.
+            assert(mmapBlocksInFlight.empty());
+            assert(nPreferredDownload == 0);
+            assert(nPeersWithValidatedDownloads == 0);
+        }
+    }
+} g_nodeStateStorage;
 
 // Requires cs_main.
-CNodeState *State(NodeId pnode) {
-    std::map<NodeId, CNodeState>::iterator it = mapNodeState.find(pnode);
-    if (it == mapNodeState.end())
-        return NULL;
-    return &it->second;
+static CNodeState *State(NodeId pnode) {
+    return g_nodeStateStorage.GetNodeState(pnode);
 }
 void UpdatePreferredDownload(CNode* node, CNodeState* state)
 {
@@ -266,13 +292,7 @@ void PushNodeVersion(CNode *pnode, CConnman& connman, int64_t nTime)
 }
 
 void InitializeNode(CNode *pnode, CConnman& connman) {
-    CAddress addr = pnode->addr;
-    std::string addrName = pnode->GetAddrName();
-    NodeId nodeid = pnode->GetId();
-    {
-        LOCK(cs_main);
-        mapNodeState.emplace_hint(mapNodeState.end(), std::piecewise_construct, std::forward_as_tuple(nodeid), std::forward_as_tuple(addr, std::move(addrName)));
-    }
+    g_nodeStateStorage.AddStateForNode(pnode->GetId(), pnode->addr, pnode->GetAddrName());
     if(!pnode->fInbound)
         PushNodeVersion(pnode, connman, GetTime());
 }
@@ -335,14 +355,7 @@ void FinalizeNode(NodeId nodeid, bool& fUpdateConnectionTime) {
     nPeersWithValidatedDownloads -= (state->nBlocksInFlightValidHeaders != 0);
     assert(nPeersWithValidatedDownloads >= 0);
 
-    mapNodeState.erase(nodeid);
-
-    if (mapNodeState.empty()) {
-        // Do a consistency check after the last peer is removed.
-        assert(mmapBlocksInFlight.empty());
-        assert(nPreferredDownload == 0);
-        assert(nPeersWithValidatedDownloads == 0);
-    }
+    g_nodeStateStorage.RemoveStateForNode(nodeid);
     LogPrint(BCLog::NET, "Cleared nodestate for peer=%d\n", nodeid);
 }
 
