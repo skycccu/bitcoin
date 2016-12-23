@@ -1240,7 +1240,7 @@ void CConnman::ThreadSocketHandler()
                             if (!pnode->ReceiveMsgBytes(pchBuf, nBytes, notify))
                                 pnode->CloseSocketDisconnect();
                             if(notify)
-                                condMsgProc.notify_one();
+                                interruptMsgProc.NonInterruptWakeup(false);
                             pnode->nLastRecv = GetTime();
                             pnode->nRecvBytes += nBytes;
                             RecordBytesRecv(nBytes);
@@ -1468,7 +1468,7 @@ void CConnman::ThreadDNSAddressSeed()
     //  less influence on the network topology, and reduces traffic to the seeds.
     if ((addrman.size() > 0) &&
         (!GetBoolArg("-forcednsseed", DEFAULT_FORCEDNSSEED))) {
-        if(!InterruptibleSleep(std::chrono::seconds(11), interruptNet))
+        if(!interruptNet.InterruptibleSleep(std::chrono::seconds(11)))
             return;
 
         LOCK(cs_vNodes);
@@ -1580,11 +1580,11 @@ void CConnman::ThreadOpenConnections()
                 OpenNetworkConnection(addr, false, NULL, strAddr.c_str());
                 for (int i = 0; i < 10 && i < nLoop; i++)
                 {
-                    if(!InterruptibleSleep(std::chrono::milliseconds(500), interruptNet))
+                    if(!interruptNet.InterruptibleSleep(std::chrono::milliseconds(500)))
                         return;
                 }
             }
-            if(!InterruptibleSleep(std::chrono::milliseconds(500), interruptNet))
+            if(!interruptNet.InterruptibleSleep(std::chrono::milliseconds(500)))
                 return;
         }
     }
@@ -1598,7 +1598,7 @@ void CConnman::ThreadOpenConnections()
     {
         ProcessOneShot();
 
-        if(!InterruptibleSleep(std::chrono::milliseconds(500), interruptNet))
+        if(!interruptNet.InterruptibleSleep(std::chrono::milliseconds(500)))
             return;
 
         CSemaphoreGrant grant(*semOutbound);
@@ -1704,7 +1704,7 @@ void CConnman::ThreadOpenConnections()
             if (fFeeler) {
                 // Add small amount of random noise before connection to avoid synchronization.
                 int randsleep = GetRandInt(FEELER_SLEEP_WINDOW * 1000);
-                if(!InterruptibleSleep(std::chrono::milliseconds(randsleep), interruptNet))
+                if(!interrupt.NetInterruptibleSleep(std::chrono::milliseconds(randsleep)))
                     return;
                 LogPrint("net", "Making feeler connection to %s\n", addrConnect.ToString());
             }
@@ -1783,11 +1783,11 @@ void CConnman::ThreadOpenAddedConnections()
                 // OpenNetworkConnection can detect existing connections to that IP/port.
                 CService service(LookupNumeric(info.strAddedNode.c_str(), Params().GetDefaultPort()));
                 OpenNetworkConnection(CAddress(service, NODE_NONE), false, &grant, info.strAddedNode.c_str(), false);
-                if(!InterruptibleSleep(std::chrono::milliseconds(500), interruptNet))
+                if(!interruptNet.InterruptibleSleep(std::chrono::milliseconds(500)))
                     return;
             }
         }
-        if(!InterruptibleSleep(std::chrono::minutes(2), interruptNet))
+        if(!interruptNet.InterruptibleSleep(std::chrono::minutes(2)))
             return;
     }
 }
@@ -1841,6 +1841,8 @@ void CConnman::ThreadMessageHandler()
 
         bool fSleep = true;
 
+        interruptMsgProc.ClearWakeup();
+
         BOOST_FOREACH(CNode* pnode, vNodesCopy)
         {
             if (pnode->fDisconnect)
@@ -1884,7 +1886,7 @@ void CConnman::ThreadMessageHandler()
 
         if(fSleep) {
             std::unique_lock<std::mutex> lock(mutexMsgProc);
-            condMsgProc.wait_until(lock, std::chrono::steady_clock::now() + std::chrono::milliseconds(100));
+            interruptMsgProc.InterruptibleSleep(std::chrono::milliseconds(100));
         }
     }
 }
@@ -2064,7 +2066,7 @@ void CConnman::SetNetworkActive(bool active)
     uiInterface.NotifyNetworkActiveChanged(fNetworkActive);
 }
 
-CConnman::CConnman(uint64_t nSeed0In, uint64_t nSeed1In) : nSeed0(nSeed0In), nSeed1(nSeed1In), interruptMsgProc(condMsgProc, mutexMsgProc), interruptNet(condNet, mutexNet)
+CConnman::CConnman(uint64_t nSeed0In, uint64_t nSeed1In) : nSeed0(nSeed0In), nSeed1(nSeed1In), interruptMsgProc(), interruptNet()
 {
     fNetworkActive = true;
     setBannedIsDirty = false;

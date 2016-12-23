@@ -423,12 +423,7 @@ private:
     /** SipHasher seeds for deterministic randomness */
     const uint64_t nSeed0, nSeed1;
 
-    std::condition_variable condMsgProc;
-    std::mutex mutexMsgProc;
     CThreadInterrupt interruptMsgProc;
-
-    std::condition_variable condNet;
-    std::mutex mutexNet;
     CThreadInterrupt interruptNet;
 
     std::thread threadDNSAddressSeed;
