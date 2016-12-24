@@ -253,14 +253,12 @@ public:
 };
 
 class NodeStateStorage {
-    /** Map maintaining per-node state. Requires cs_main. */
+    /** Map maintaining per-node state. */
     std::map<NodeId, std::shared_ptr<CNodeState>> mapNodeState;
     CCriticalSection cs_mapNodeState;
 
 public:
     CNodeStateAccessor GetNodeState(NodeId nodeid) {
-        AssertLockHeld(cs_main); // TODO: Remove State reliance on cs_main
-
         std::shared_ptr<CNodeState> pstate;
         {
             LOCK(cs_mapNodeState);
@@ -273,13 +271,11 @@ public:
     }
 
     void AddStateForNode(NodeId nodeid, const CAddress& addr, const std::string& addrName) {
-        LOCK(cs_main); // TODO: Remove State reliance on cs_main
         LOCK(cs_mapNodeState);
         mapNodeState.emplace_hint(mapNodeState.end(), nodeid, std::make_shared<CNodeState>(addr, addrName));
     }
 
     void RemoveStateForNode(NodeId nodeid) {
-        LOCK(cs_main); // TODO: Remove State reliance on cs_main
         LOCK(cs_mapNodeState);
 
         auto it = mapNodeState.find(nodeid);
@@ -290,7 +286,6 @@ public:
     }
 } nodeStateStorage;
 
-// Requires cs_main.
 static CNodeStateAccessor State(NodeId pnode) {
     return nodeStateStorage.GetNodeState(pnode);
 }
@@ -530,7 +525,6 @@ bool CanDirectFetch(const Consensus::Params &consensusParams)
     return chainActive.Tip()->GetBlockTime() > GetAdjustedTime() - consensusParams.nPowTargetSpacing * 20;
 }
 
-// Requires cs_main
 bool PeerHasHeader(CNodeStateAccessor& state, const CBlockIndex *pindex)
 {
     if (state->pindexBestKnownBlock && pindex == state->pindexBestKnownBlock->GetAncestor(pindex->nHeight))
@@ -652,7 +646,6 @@ void FindNextBlocksToDownload(NodeId nodeid, unsigned int count, std::vector<con
 } // anon namespace
 
 bool GetNodeStateStats(NodeId nodeid, CNodeStateStats &stats) {
-    LOCK(cs_main);
     CNodeStateAccessor state = State(nodeid);
     if (!state)
         return false;
@@ -801,7 +794,6 @@ unsigned int LimitOrphanTxSize(unsigned int nMaxOrphans) EXCLUSIVE_LOCKS_REQUIRE
     return nEvicted;
 }
 
-// Requires cs_main.
 void Misbehaving(NodeId pnode, int howmuch)
 {
     if (howmuch == 0)
@@ -1397,7 +1389,6 @@ inline void static SendBlockTransactions(const CBlock& block, const BlockTransac
     BlockTransactions resp(req);
     for (size_t i = 0; i < req.indexes.size(); i++) {
         if (req.indexes[i] >= block.vtx.size()) {
-            LOCK(cs_main);
             Misbehaving(pfrom->GetId(), 100);
             LogPrintf("Peer %d sent us a getblocktxn with out-of-bounds tx indices", pfrom->id);
             return;
@@ -1425,7 +1416,6 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
                strCommand == NetMsgType::FILTERADD))
     {
         if (pfrom->nVersion >= NO_BLOOM_VERSION) {
-            LOCK(cs_main);
             Misbehaving(pfrom->GetId(), 100);
             return false;
         } else {
@@ -1464,7 +1454,6 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
         if (pfrom->nVersion != 0)
         {
             connman.PushMessage(pfrom, CNetMsgMaker(INIT_PROTO_VERSION).Make(NetMsgType::REJECT, strCommand, REJECT_DUPLICATE, std::string("Duplicate version message")));
-            LOCK(cs_main);
             Misbehaving(pfrom->GetId(), 1);
             return false;
         }
@@ -1629,7 +1618,6 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
     else if (pfrom->nVersion == 0)
     {
         // Must have a version message before anything else
-        LOCK(cs_main);
         Misbehaving(pfrom->GetId(), 1);
         return false;
     }
@@ -1688,7 +1676,6 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
             return true;
         if (vAddr.size() > 1000)
         {
-            LOCK(cs_main);
             Misbehaving(pfrom->GetId(), 20);
             return error("message addr size() = %u", vAddr.size());
         }
@@ -1737,7 +1724,6 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
         uint64_t nCMPCTBLOCKVersion = 0;
         vRecv >> fAnnounceUsingCMPCTBLOCK >> nCMPCTBLOCKVersion;
         if (nCMPCTBLOCKVersion == 1 || ((pfrom->GetLocalServices() & NODE_WITNESS) && nCMPCTBLOCKVersion == 2)) {
-            LOCK(cs_main);
             CNodeStateAccessor nodestate = State(pfrom->GetId());
             // fProvidesHeaderAndIDs is used to "lock in" version of compact blocks we send (fWantsCmpctWitness)
             if (!nodestate->fProvidesHeaderAndIDs) {
@@ -1762,7 +1748,6 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
         vRecv >> vInv;
         if (vInv.size() > MAX_INV_SZ)
         {
-            LOCK(cs_main);
             Misbehaving(pfrom->GetId(), 20);
             return error("message inv size() = %u", vInv.size());
         }
@@ -1829,7 +1814,6 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
         vRecv >> vInv;
         if (vInv.size() > MAX_INV_SZ)
         {
-            LOCK(cs_main);
             Misbehaving(pfrom->GetId(), 20);
             return error("message getdata size() = %u", vInv.size());
         }
