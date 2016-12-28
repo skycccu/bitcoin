@@ -286,15 +286,7 @@ public:
         if (it == mapNodeState.end())
             return;
 
-        assert(it->second.use_count() == 1);
         mapNodeState.erase(it);
-
-        if (mapNodeState.empty()) {
-            // Do a consistency check after the last peer is removed.
-            assert(mmapBlocksInFlight.empty());
-            assert(nPreferredDownload == 0);
-            assert(nPeersWithValidatedDownloads == 0);
-        }
     }
 } nodeStateStorage;
 
