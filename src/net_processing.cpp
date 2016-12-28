@@ -279,17 +279,7 @@ public:
         if (it == m_mapNodeState.end())
             return;
 
-        // At this point the only shared_ptr holder should be us
-        // (enforced by cs_main).
-        assert(it->second.use_count() == 1);
         m_mapNodeState.erase(it);
-
-        if (m_mapNodeState.empty()) {
-            // Do a consistency check after the last peer is removed.
-            assert(mmapBlocksInFlight.empty());
-            assert(nPreferredDownload == 0);
-            assert(nPeersWithValidatedDownloads == 0);
-        }
     }
 } g_nodeStateStorage;
 
