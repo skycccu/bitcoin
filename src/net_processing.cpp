@@ -2849,7 +2849,7 @@ static bool SendRejectsAndCheckIfBanned(CNode* pnode, NodeStateAccessor& state, 
     return false;
 }
 
-bool ProcessMessages(CNode* pfrom, CConnman& connman, const std::atomic<bool>& interruptMsgProc)
+unsigned int ProcessMessages(CNode* pfrom, CConnman& connman, const std::atomic<bool>& interruptMsgProc)
 {
     const CChainParams& chainparams = Params();
     //
@@ -2866,7 +2866,7 @@ bool ProcessMessages(CNode* pfrom, CConnman& connman, const std::atomic<bool>& i
         NodeStateAccessor nodestate = State(pfrom->GetId());
         if (nodestate->m_awaiting_callback_completion) {
             // No more work to do, let the callback WakeMessageHandler()
-            return false;
+            return 0;
         }
     }
 
@@ -2876,20 +2876,20 @@ bool ProcessMessages(CNode* pfrom, CConnman& connman, const std::atomic<bool>& i
     }
 
     if (pfrom->fDisconnect)
-        return false;
+        return 0;
 
     // this maintains the order of responses
-    if (!pfrom->vRecvGetData.empty()) return true;
+    if (!pfrom->vRecvGetData.empty()) return PROCESS_MESSAGES_MORE_AVAILABLE;
 
     // Don't bother if send buffer is too full to respond anyway
     if (pfrom->fPauseSend)
-        return false;
+        return 0;
 
     std::list<CNetMessage> msgs;
     {
         LOCK(pfrom->cs_vProcessMsg);
         if (pfrom->vProcessMsg.empty())
-            return false;
+            return 0;
         // Just take one message
         msgs.splice(msgs.begin(), pfrom->vProcessMsg, pfrom->vProcessMsg.begin());
         pfrom->nProcessQueueSize -= msgs.front().vRecv.size() + CMessageHeader::HEADER_SIZE;
@@ -2903,7 +2903,7 @@ bool ProcessMessages(CNode* pfrom, CConnman& connman, const std::atomic<bool>& i
     if (memcmp(msg.hdr.pchMessageStart, chainparams.MessageStart(), CMessageHeader::MESSAGE_START_SIZE) != 0) {
         LogPrintf("PROCESSMESSAGE: INVALID MESSAGESTART %s peer=%d\n", SanitizeString(msg.hdr.GetCommand()), pfrom->GetId());
         pfrom->fDisconnect = true;
-        return false;
+        return 0;
     }
 
     // Read header
@@ -2911,7 +2911,7 @@ bool ProcessMessages(CNode* pfrom, CConnman& connman, const std::atomic<bool>& i
     if (!hdr.IsValid(chainparams.MessageStart()))
     {
         LogPrintf("PROCESSMESSAGE: ERRORS IN HEADER %s peer=%d\n", SanitizeString(hdr.GetCommand()), pfrom->GetId());
-        return fMoreWork;
+        return fMoreWork ? PROCESS_MESSAGES_MORE_AVAILABLE : 0;
     }
     std::string strCommand = hdr.GetCommand();
 
@@ -2927,7 +2927,7 @@ bool ProcessMessages(CNode* pfrom, CConnman& connman, const std::atomic<bool>& i
            SanitizeString(strCommand), nMessageSize,
            HexStr(hash.begin(), hash.begin()+CMessageHeader::CHECKSUM_SIZE),
            HexStr(hdr.pchChecksum, hdr.pchChecksum+CMessageHeader::CHECKSUM_SIZE));
-        return fMoreWork;
+        return fMoreWork ? PROCESS_MESSAGES_MORE_AVAILABLE : 0;
     }
 
     // Process message
@@ -2938,7 +2938,7 @@ bool ProcessMessages(CNode* pfrom, CConnman& connman, const std::atomic<bool>& i
         NodeStateAccessor state = State(pfrom->GetId());
         fRet = ProcessMessage(pfrom, state, strCommand, vRecv, msg.nTime, chainparams, connman, interruptMsgProc, other_node_ban_map);
         if (interruptMsgProc)
-            return false;
+            return 0;
         if (!pfrom->vRecvGetData.empty())
             fMoreWork = true;
     }
@@ -2998,7 +2998,7 @@ bool ProcessMessages(CNode* pfrom, CConnman& connman, const std::atomic<bool>& i
         SendRejectsAndCheckIfBanned(pfrom, nodestate, connman);
     }
 
-    return fMoreWork;
+    return fMoreWork ? PROCESS_MESSAGES_MORE_AVAILABLE : 0;
 }
 
 class CompareInvMempoolOrder
