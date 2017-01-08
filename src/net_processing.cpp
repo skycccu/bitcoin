@@ -2910,6 +2910,8 @@ static bool SendRejectsAndCheckIfBanned(CNode* pnode, NodeStateAccessor& state, 
 
 unsigned int ProcessMessages(CNode* pfrom, CConnman& connman, const std::atomic<bool>& interruptMsgProc, bool avoid_locking)
 {
+    DISALLOW_LOCK(cs_main, avoid_locking);
+
     const CChainParams& chainparams = Params();
     //
     // Message format
