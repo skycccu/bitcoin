@@ -59,7 +59,7 @@ map<uint256, COrphanTx> mapOrphanTransactions GUARDED_BY(cs_main);
 map<COutPoint, set<map<uint256, COrphanTx>::iterator, IteratorComparator>> mapOrphanTransactionsByPrev GUARDED_BY(cs_main);
 void EraseOrphansFor(NodeId peer) EXCLUSIVE_LOCKS_REQUIRED(cs_main);
 
-static size_t vExtraTxnForCompactIt = 0;
+static size_t vExtraTxnForCompactIt = 0, vExtraTxnForCompactCurrentSize = 0;
 static std::vector<std::pair<uint256, CTransactionRef>> vExtraTxnForCompact GUARDED_BY(cs_main);
 
 static const uint64_t RANDOMIZER_ID_ADDRESS_RELAY = 0x3cac0035b5866b90ULL; // SHA256("main address relay")[0:8]
@@ -591,13 +591,51 @@ void UnregisterNodeSignals(CNodeSignals& nodeSignals)
 
 void AddToCompactExtraTransactions(const CTransactionRef& tx)
 {
-    size_t max_extra_txn = GetArg("-blockreconstructionextratxn", DEFAULT_BLOCK_RECONSTRUCTION_EXTRA_TXN);
-    if (max_extra_txn <= 0)
+    size_t max_extra_txn_size = GetArg("-recenttxcachesize", DEFAULT_RECENT_TXN_CACHE_SIZE) * 1000;
+
+    if (max_extra_txn_size <= 0) {
         return;
-    if (!vExtraTxnForCompact.size())
-        vExtraTxnForCompact.resize(max_extra_txn);
-    vExtraTxnForCompact[vExtraTxnForCompactIt] = std::make_pair(tx->GetWitnessHash(), tx);
-    vExtraTxnForCompactIt = (vExtraTxnForCompactIt + 1) % max_extra_txn;
+    }
+
+    size_t tx_usage = RecursiveDynamicUsage(*tx);
+
+    if (tx_usage >= max_extra_txn_size) {
+        return;
+    }
+
+    // If we're ready to insert a new element at the end of our vector
+    if (vExtraTxnForCompactIt >= vExtraTxnForCompact.size()) {
+        if (vExtraTxnForCompactCurrentSize + tx_usage <= max_extra_txn_size) {
+            vExtraTxnForCompact.emplace_back(tx->GetWitnessHash(), tx);
+            // This will keep us from falling into the next conditional
+            vExtraTxnForCompactIt = vExtraTxnForCompact.size();
+        } else {
+            // Not enough room, wrap around and replace the first element
+            vExtraTxnForCompactIt = 0;
+        }
+    }
+
+    if (vExtraTxnForCompactIt < vExtraTxnForCompact.size()) {
+        if (!vExtraTxnForCompact[vExtraTxnForCompactIt].first.IsNull())
+            vExtraTxnForCompactCurrentSize -= RecursiveDynamicUsage(*vExtraTxnForCompact[vExtraTxnForCompactIt].second);
+        vExtraTxnForCompact[vExtraTxnForCompactIt] = std::make_pair(tx->GetWitnessHash(), tx);
+        vExtraTxnForCompactIt++;
+    }
+
+    vExtraTxnForCompactCurrentSize += tx_usage;
+
+    size_t clear_it = vExtraTxnForCompactIt % vExtraTxnForCompact.size();
+    while (vExtraTxnForCompactCurrentSize > max_extra_txn_size) {
+        if (!vExtraTxnForCompact[clear_it].first.IsNull())
+            vExtraTxnForCompactCurrentSize -= RecursiveDynamicUsage(*vExtraTxnForCompact[clear_it].second);
+        vExtraTxnForCompact[clear_it].second.reset();
+        vExtraTxnForCompact[clear_it].first.SetNull();
+        clear_it = (clear_it + 1) % vExtraTxnForCompact.size();
+    }
+
+    while (vExtraTxnForCompact.size() && vExtraTxnForCompact.back().first.IsNull()) {
+        vExtraTxnForCompact.pop_back();
+    }
 }
 
 bool AddOrphanTx(const CTransactionRef& tx, NodeId peer) EXCLUSIVE_LOCKS_REQUIRED(cs_main)
