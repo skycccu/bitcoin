@@ -3761,6 +3761,8 @@ static bool AcceptBlock(const CBlock& block, CValidationState& state, const CCha
         bool fWitnessEnabled = IsWitnessEnabled(pindex->pprev, Params().GetConsensus());
 
         BOOST_FOREACH(CNode* pnode, vNodes) {
+            if (pnode->nVersion < INVALID_CB_NO_BAN_VERSION)
+                continue;
             ProcessBlockAvailability(pnode->GetId());
             CNodeState &state = *State(pnode->GetId());
             if (state.fPreferHeaderAndIDs && (!fWitnessEnabled || state.fWantsCmpctWitness) &&
