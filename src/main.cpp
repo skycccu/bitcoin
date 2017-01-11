@@ -3740,8 +3740,11 @@ static bool AcceptBlock(const CBlock& block, CValidationState& state, const CCha
         return AbortNode(state, std::string("System error: ") + e.what());
     }
 
+    static int nHighestFastAnnounce = 0;
     // Header is valid/has work, merkle tree and segwit merkle tree are good...RELAY NOW
-    if (!IsInitialBlockDownload()) {
+    if (!IsInitialBlockDownload() && chainActive.Tip() == pindex->pprev && pindex->nHeight > nHighestFastAnnounce) {
+        nHighestFastAnnounce = pindex->nHeight;
+
         LOCK(cs_vNodes);
         CDataStream ssSend(SER_NETWORK, INIT_PROTO_VERSION);
         ssSend << CMessageHeader(Params().MessageStart(), NetMsgType::CMPCTBLOCK, 0);
@@ -3755,9 +3758,12 @@ static bool AcceptBlock(const CBlock& block, CValidationState& state, const CCha
         assert(ssSend.size () >= CMessageHeader::CHECKSUM_OFFSET + sizeof(nChecksum));
         memcpy((char*)&ssSend[CMessageHeader::CHECKSUM_OFFSET], &nChecksum, sizeof(nChecksum));
 
+        bool fWitnessEnabled = IsWitnessEnabled(pindex->pprev, Params().GetConsensus());
+
         BOOST_FOREACH(CNode* pnode, vNodes) {
+            ProcessBlockAvailability(pnode->GetId());
             CNodeState &state = *State(pnode->GetId());
-            if (state.fPreferHeaderAndIDs && (!IsWitnessEnabled(pindex, chainparams.GetConsensus()) || state.fWantsCmpctWitness) &&
+            if (state.fPreferHeaderAndIDs && (!fWitnessEnabled || state.fWantsCmpctWitness) &&
                     !PeerHasHeader(&state, pindex) && PeerHasHeader(&state, pindex->pprev)) {
                 pnode->PushSerializedMessage(NetMsgType::CMPCTBLOCK, ssSend);
                 state.pindexBestHeaderSent = pindex;
