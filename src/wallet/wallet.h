@@ -603,6 +603,11 @@ private:
     bool fFileBacked;
 
     std::set<int64_t> setKeyPool;
+
+    // Used to NotifyTransactionChanged of the previous block's coinbase when
+    // the next block comes in
+    uint256 hashPrevBestCoinbase;
+
 public:
     /*
      * Main wallet lock.
