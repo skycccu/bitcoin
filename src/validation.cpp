@@ -973,7 +973,7 @@ bool AcceptToMemoryPoolWorker(CTxMemPool& pool, CValidationState& state, const C
         }
     }
 
-    GetMainSignals().SyncTransaction(tx, NULL, CMainSignals::SYNC_TRANSACTION_NOT_IN_BLOCK);
+    GetMainSignals().SyncTransactions(std::vector<CTransactionRef>({ptx}), NULL);
 
     return true;
 }
@@ -2182,9 +2182,7 @@ bool static DisconnectTip(CValidationState& state, const CChainParams& chainpara
     UpdateTip(pindexDelete->pprev, chainparams);
     // Let wallets know transactions went from 1-confirmed to
     // 0-confirmed or conflicted:
-    for (const auto& tx : block.vtx) {
-        GetMainSignals().SyncTransaction(*tx, pindexDelete->pprev, CMainSignals::SYNC_TRANSACTION_NOT_IN_BLOCK);
-    }
+    GetMainSignals().SyncTransactions(block.vtx, NULL);
     return true;
 }
 
@@ -2478,8 +2476,7 @@ bool ActivateBestChain(CValidationState &state, const CChainParams& chainparams,
             for (const auto& pair : connectTrace.blocksConnected) {
                 assert(pair.second);
                 const CBlock& block = *(pair.second);
-                for (unsigned int i = 0; i < block.vtx.size(); i++)
-                    GetMainSignals().SyncTransaction(*block.vtx[i], pair.first, i);
+                GetMainSignals().SyncTransactions(block.vtx, pair.first);
             }
         }
         // When we reach this point, we switched to a new tip (stored in pindexNewTip).
