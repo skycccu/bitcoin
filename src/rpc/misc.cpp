@@ -72,6 +72,7 @@ UniValue getinfo(const JSONRPCRequest& request)
 #ifdef ENABLE_WALLET
     if (pwalletMain) {
         pwalletMain->BlockUntilSyncedToCurrentChain();
+        LOCK(pwalletMain->cs_wallet_intra_block);
     }
     LOCK2(cs_main, pwalletMain ? &pwalletMain->cs_wallet : NULL);
 #else

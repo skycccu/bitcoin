@@ -1123,9 +1123,12 @@ void CWallet::MarkConflicted(const uint256& hashBlock, const uint256& hashTx)
 
 void CWallet::SyncTransactions(const std::vector<CTransactionRef>& vtx, const CBlockIndex *pindex)
 {
-    LOCK2(cs_main, cs_wallet);
+    AssertLockNotHeld(cs_main);
+    AssertLockNotHeld(cs_wallet);
+    LOCK(cs_wallet_intra_block);
 
     for (size_t i = 0; i < vtx.size(); i++) {
+        LOCK2(cs_main, cs_wallet); // Keep cs_main relatively free for others to take
         const CTransaction& tx = *vtx[i];
 
         if (!AddToWalletIfInvolvingMe(tx, pindex, pindex ? i : -1, true))
@@ -1145,6 +1148,7 @@ void CWallet::SyncTransactions(const std::vector<CTransactionRef>& vtx, const CB
     if (pindex) {
         // Only notify UI if this transaction is in this wallet
         {
+            LOCK2(cs_main, cs_wallet);
             if (hashPrevBestCoinbase.IsNull()) {
                 // For correctness we scan over the entire wallet, looking for
                 // the previous block's coinbase, just in case it is ours, so
@@ -1162,9 +1166,9 @@ void CWallet::SyncTransactions(const std::vector<CTransactionRef>& vtx, const CB
                 if (mi != mapWallet.end())
                     NotifyTransactionChanged(this, hashPrevBestCoinbase, CT_UPDATED);
             }
-        }
 
-        hashPrevBestCoinbase = vtx[0]->GetHash();
+            hashPrevBestCoinbase = vtx[0]->GetHash();
+        }
 
         {
             std::unique_lock<std::mutex> lock(lastBlockProcessedMutex);

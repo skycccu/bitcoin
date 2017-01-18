@@ -623,8 +623,20 @@ public:
      *   except for:
      *      fFileBacked (immutable after instantiation)
      *      strWalletFile (immutable after instantiation)
+	 * Note that if you take this lock without taking cs_wallet_intra_block
+	 * first, you may see state as of the middle of a block (ie some txn updated
+	 * in the block will be updated, others will not be).
      */
     mutable CCriticalSection cs_wallet;
+
+    /*
+     * Wallet full-block-consistency lock.
+     * Taking this lock allows you to ensure the wallet's state is set based on
+     * a full block's data, not based on only part of a block.
+     * It is separate from cs_wallet because it must be locked prior to cs_main
+     * instead of after.
+     */
+    mutable CCriticalSection cs_wallet_intra_block;
 
     const std::string strWalletFile;
 

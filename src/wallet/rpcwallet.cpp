@@ -406,6 +406,7 @@ UniValue sendtoaddress(const JSONRPCRequest& request)
     // the user could have gotten from another RPC command prior to now
     pwalletMain->BlockUntilSyncedToCurrentChain();
 
+    LOCK(pwalletMain->cs_wallet_intra_block);
     LOCK2(cs_main, pwalletMain->cs_wallet);
 
     CBitcoinAddress address(request.params[0].get_str());
@@ -467,6 +468,7 @@ UniValue listaddressgroupings(const JSONRPCRequest& request)
     // the user could have gotten from another RPC command prior to now
     pwalletMain->BlockUntilSyncedToCurrentChain();
 
+    LOCK(pwalletMain->cs_wallet_intra_block);
     LOCK2(cs_main, pwalletMain->cs_wallet);
 
     UniValue jsonGroupings(UniValue::VARR);
@@ -575,6 +577,7 @@ UniValue getreceivedbyaddress(const JSONRPCRequest& request)
     // the user could have gotten from another RPC command prior to now
     pwalletMain->BlockUntilSyncedToCurrentChain();
 
+    LOCK(pwalletMain->cs_wallet_intra_block);
     LOCK2(cs_main, pwalletMain->cs_wallet);
 
     // Bitcoin address
@@ -637,6 +640,7 @@ UniValue getreceivedbyaccount(const JSONRPCRequest& request)
     // the user could have gotten from another RPC command prior to now
     pwalletMain->BlockUntilSyncedToCurrentChain();
 
+    LOCK(pwalletMain->cs_wallet_intra_block);
     LOCK2(cs_main, pwalletMain->cs_wallet);
 
     // Minimum confirmations
@@ -700,6 +704,7 @@ UniValue getbalance(const JSONRPCRequest& request)
     // the user could have gotten from another RPC command prior to now
     pwalletMain->BlockUntilSyncedToCurrentChain();
 
+    LOCK(pwalletMain->cs_wallet_intra_block);
     LOCK2(cs_main, pwalletMain->cs_wallet);
 
     if (request.params.size() == 0)
@@ -762,6 +767,7 @@ UniValue getunconfirmedbalance(const JSONRPCRequest &request)
     // the user could have gotten from another RPC command prior to now
     pwalletMain->BlockUntilSyncedToCurrentChain();
 
+    LOCK(pwalletMain->cs_wallet_intra_block);
     LOCK2(cs_main, pwalletMain->cs_wallet);
 
     return ValueFromAmount(pwalletMain->GetUnconfirmedBalance());
@@ -850,6 +856,7 @@ UniValue sendfrom(const JSONRPCRequest& request)
     // the user could have gotten from another RPC command prior to now
     pwalletMain->BlockUntilSyncedToCurrentChain();
 
+    LOCK(pwalletMain->cs_wallet_intra_block);
     LOCK2(cs_main, pwalletMain->cs_wallet);
 
     string strAccount = AccountFromValue(request.params[0]);
@@ -928,6 +935,7 @@ UniValue sendmany(const JSONRPCRequest& request)
     // the user could have gotten from another RPC command prior to now
     pwalletMain->BlockUntilSyncedToCurrentChain();
 
+    LOCK(pwalletMain->cs_wallet_intra_block);
     LOCK2(cs_main, pwalletMain->cs_wallet);
 
     if (pwalletMain->GetBroadcastTransactions() && !g_connman)
@@ -1319,6 +1327,7 @@ UniValue listreceivedbyaddress(const JSONRPCRequest& request)
     // the user could have gotten from another RPC command prior to now
     pwalletMain->BlockUntilSyncedToCurrentChain();
 
+    LOCK(pwalletMain->cs_wallet_intra_block);
     LOCK2(cs_main, pwalletMain->cs_wallet);
 
     return ListReceived(request.params, false);
@@ -1360,6 +1369,7 @@ UniValue listreceivedbyaccount(const JSONRPCRequest& request)
     // the user could have gotten from another RPC command prior to now
     pwalletMain->BlockUntilSyncedToCurrentChain();
 
+    LOCK(pwalletMain->cs_wallet_intra_block);
     LOCK2(cs_main, pwalletMain->cs_wallet);
 
     return ListReceived(request.params, true);
@@ -1533,6 +1543,7 @@ UniValue listtransactions(const JSONRPCRequest& request)
     // the user could have gotten from another RPC command prior to now
     pwalletMain->BlockUntilSyncedToCurrentChain();
 
+    LOCK(pwalletMain->cs_wallet_intra_block);
     LOCK2(cs_main, pwalletMain->cs_wallet);
 
     string strAccount = "*";
@@ -1628,6 +1639,7 @@ UniValue listaccounts(const JSONRPCRequest& request)
     // the user could have gotten from another RPC command prior to now
     pwalletMain->BlockUntilSyncedToCurrentChain();
 
+    LOCK(pwalletMain->cs_wallet_intra_block);
     LOCK2(cs_main, pwalletMain->cs_wallet);
 
     int nMinDepth = 1;
@@ -1729,6 +1741,7 @@ UniValue listsinceblock(const JSONRPCRequest& request)
     // the user could have gotten from another RPC command prior to now
     pwalletMain->BlockUntilSyncedToCurrentChain();
 
+    LOCK(pwalletMain->cs_wallet_intra_block);
     LOCK2(cs_main, pwalletMain->cs_wallet);
 
     CBlockIndex *pindex = NULL;
@@ -1833,6 +1846,7 @@ UniValue gettransaction(const JSONRPCRequest& request)
     // the user could have gotten from another RPC command prior to now
     pwalletMain->BlockUntilSyncedToCurrentChain();
 
+    LOCK(pwalletMain->cs_wallet_intra_block);
     LOCK2(cs_main, pwalletMain->cs_wallet);
 
     uint256 hash;
@@ -2372,6 +2386,7 @@ UniValue getwalletinfo(const JSONRPCRequest& request)
     // the user could have gotten from another RPC command prior to now
     pwalletMain->BlockUntilSyncedToCurrentChain();
 
+    LOCK(pwalletMain->cs_wallet_intra_block);
     LOCK2(cs_main, pwalletMain->cs_wallet);
 
     UniValue obj(UniValue::VOBJ);
@@ -2492,6 +2507,7 @@ UniValue listunspent(const JSONRPCRequest& request)
     UniValue results(UniValue::VARR);
     vector<COutput> vecOutputs;
     assert(pwalletMain != NULL);
+    LOCK(pwalletMain->cs_wallet_intra_block);
     LOCK2(cs_main, pwalletMain->cs_wallet);
     pwalletMain->AvailableCoins(vecOutputs, false, NULL, true);
     BOOST_FOREACH(const COutput& out, vecOutputs) {
