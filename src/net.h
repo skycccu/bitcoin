@@ -566,6 +566,7 @@ public:
     // socket
     ServiceFlags nServices;
     ServiceFlags nServicesExpected;
+    CCriticalSection cs_hSocket;
     SOCKET hSocket;
     size_t nSendSize; // total size of all vSendMsg entries
     size_t nSendOffset; // offset inside the first vSendMsg already sent
