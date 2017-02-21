@@ -333,6 +333,8 @@ void InitializeNode(CNode *pnode, CConnman& connman) {
 // Requires cs_main
 // Helper function for MarkBlockAsReceivedIfValid and MarkBlockAsNotInFlight
 void ClearDownloadState(BlockDownloadMap::iterator itInFlight) {
+    AssertLockHeld(cs_main);
+
     CNodeStateAccessor state = State(itInFlight->second.first);
     state->nBlocksInFlightValidHeaders -= itInFlight->second.second->fValidatedHeaders;
     if (state->nBlocksInFlightValidHeaders == 0 && itInFlight->second.second->fValidatedHeaders) {
@@ -353,6 +355,8 @@ void ClearDownloadState(BlockDownloadMap::iterator itInFlight) {
 // a block if for some reason block was not received. Download state clearing is
 // skipped as an optimization in FinalizeNode.
 void MarkBlockAsNotInFlight(const uint256& hash, NodeId nodeid, bool clearState = true) {
+    AssertLockHeld(cs_main);
+
     std::pair<BlockDownloadMap::iterator, BlockDownloadMap::iterator> range = mmapBlocksInFlight.equal_range(hash);
     while (range.first != range.second) {
         BlockDownloadMap::iterator itInFlight = range.first;
@@ -397,6 +401,8 @@ void FinalizeNode(NodeId nodeid, bool& fUpdateConnectionTime) {
 // BLOCK_VALID_TRANSACTIONS, if not, remaining outstanding requests may want to
 // be completed to allow for the possibility of a malleated block.
 void MarkBlockAsReceivedIfValid(const uint256& hash) {
+    AssertLockHeld(cs_main);
+
     BlockMap::iterator mi = mapBlockIndex.find(hash);
     if (mi != mapBlockIndex.end() && mi->second->IsValid(BLOCK_VALID_TRANSACTIONS)) {
         std::pair<BlockDownloadMap::iterator, BlockDownloadMap::iterator> range = mmapBlocksInFlight.equal_range(hash);
@@ -411,6 +417,8 @@ void MarkBlockAsReceivedIfValid(const uint256& hash) {
 // returns false, still setting pit, if the block was already in flight from the same peer
 // pit will only be valid as long as the same cs_main lock is being held
 bool MarkBlockAsInFlight(NodeId nodeid, const uint256& hash, const Consensus::Params& consensusParams, const CBlockIndex* pindex = NULL, std::list<QueuedBlock>::iterator** pit = NULL) {
+    AssertLockHeld(cs_main);
+
     CNodeStateAccessor state = State(nodeid);
     assert(state);
 
@@ -444,6 +452,8 @@ bool MarkBlockAsInFlight(NodeId nodeid, const uint256& hash, const Consensus::Pa
 
 /** Check whether the last unknown block a peer advertised is not yet known. */
 void ProcessBlockAvailability(NodeId nodeid) {
+    AssertLockHeld(cs_main);
+
     CNodeStateAccessor state = State(nodeid);
     assert(state);
 
@@ -459,6 +469,8 @@ void ProcessBlockAvailability(NodeId nodeid) {
 
 /** Update tracking information about which blocks a peer is assumed to have. */
 void UpdateBlockAvailability(NodeId nodeid, const uint256 &hash) {
+    AssertLockHeld(cs_main);
+
     CNodeStateAccessor state = State(nodeid);
     assert(state);
 
@@ -513,6 +525,8 @@ void MaybeSetPeerAsAnnouncingHeaderAndIDs(NodeId nodeid, CConnman& connman) {
 // Requires cs_main
 bool CanDirectFetch(const Consensus::Params &consensusParams)
 {
+    AssertLockHeld(cs_main);
+
     return chainActive.Tip()->GetBlockTime() > GetAdjustedTime() - consensusParams.nPowTargetSpacing * 20;
 }
 
@@ -548,6 +562,8 @@ const CBlockIndex* LastCommonAncestor(const CBlockIndex* pa, const CBlockIndex* 
 /** Update pindexLastCommonBlock and add not-in-flight missing successors to vBlocks, until it has
  *  at most count entries. */
 void FindNextBlocksToDownload(NodeId nodeid, unsigned int count, std::vector<const CBlockIndex*>& vBlocks, NodeId& nodeStaller, const Consensus::Params& consensusParams) {
+    AssertLockHeld(cs_main);
+
     if (count == 0)
         return;
 
