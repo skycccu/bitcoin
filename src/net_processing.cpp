@@ -1009,12 +1009,13 @@ void PeerLogicValidation::UpdatedBlockTip(const CBlockIndex *pindexNew, const CB
                 break;
             }
         }
+
+        std::reverse(vHashes.begin(), vHashes.end());
+
         // Relay inventory, but don't relay old inventory during initial block download.
-        connman->ForEachNode([nNewHeight, &vHashes](CNode* pnode) {
+        connman->ForEachNode([nNewHeight, &vHashes, this](CNode* pnode) {
             if (nNewHeight > (pnode->nStartingHeight != -1 ? pnode->nStartingHeight - 2000 : 0)) {
-                BOOST_REVERSE_FOREACH(const uint256& hash, vHashes) {
-                    pnode->PushBlockHash(hash);
-                }
+                AnnounceBlocksToPeer(pnode, vHashes, *connman);
             }
         });
         connman->WakeMessageHandler();
@@ -3079,12 +3080,6 @@ bool SendMessages(CNode* pto, CConnman& connman, const std::atomic<bool>& interr
         if (!fReindex && !fImporting && !IsInitialBlockDownload())
         {
             GetMainSignals().Broadcast(nTimeBestReceived, &connman);
-        }
-
-        {
-            LOCK(pto->cs_inventory);
-            AnnounceBlocksToPeer(pto, pto->vBlockHashesToAnnounce, connman);
-            pto->vBlockHashesToAnnounce.clear();
         }
 
         //

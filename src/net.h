@@ -650,9 +650,6 @@ public:
     std::set<uint256> setAskFor;
     std::multimap<int64_t, CInv> mapAskFor;
     int64_t nNextInvSend;
-    // Used for headers announcements - unfiltered blocks to relay
-    // Also protected by cs_inventory
-    std::vector<uint256> vBlockHashesToAnnounce;
     // Used for BIP35 mempool sending, also protected by cs_inventory
     bool fSendMempool;
 
@@ -788,12 +785,6 @@ public:
         } else if (inv.type == MSG_BLOCK) {
             vInventoryBlockToSend.push_back(inv.hash);
         }
-    }
-
-    void PushBlockHash(const uint256 &hash)
-    {
-        LOCK(cs_inventory);
-        vBlockHashesToAnnounce.push_back(hash);
     }
 
     void AskFor(const CInv& inv);
