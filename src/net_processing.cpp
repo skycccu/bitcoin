@@ -395,12 +395,11 @@ void FinalizeNode(NodeId nodeid, bool& fUpdateConnectionTime) {
 // mmapBlocksInFlight in case of multiple downloads. But first check that it is
 // BLOCK_VALID_TRANSACTIONS, if not, remaining outstanding requests may want to
 // be completed to allow for the possibility of a malleated block.
-void MarkBlockAsReceivedIfValid(const uint256& hash) {
+void MarkBlockAsReceivedIfValid(const CBlockIndex* pindex) {
     AssertLockHeld(cs_main);
 
-    BlockMap::iterator mi = mapBlockIndex.find(hash);
-    if (mi != mapBlockIndex.end() && mi->second->IsValid(BLOCK_VALID_TRANSACTIONS)) {
-        std::pair<BlockDownloadMap::iterator, BlockDownloadMap::iterator> range = mmapBlocksInFlight.equal_range(hash);
+    if (pindex->IsValid(BLOCK_VALID_TRANSACTIONS)) {
+        std::pair<BlockDownloadMap::iterator, BlockDownloadMap::iterator> range = mmapBlocksInFlight.equal_range(pindex->GetBlockHash());
         while (range.first != range.second) {
             ClearDownloadState(range.first);
             range.first = mmapBlocksInFlight.erase(range.first);
@@ -1114,6 +1113,12 @@ void PeerLogicValidation::BlockChecked(const CBlock& block, const CValidationSta
     }
     if (it != mapBlockSource.end())
         mapBlockSource.erase(it);
+}
+
+
+void PeerLogicValidation::NewBlockProcessed(const CBlockIndex *pindex, const std::shared_ptr<const CBlock>& pblock) {
+    LOCK(cs_main); // to test validity
+    MarkBlockAsReceivedIfValid(pindex);
 }
 
 //////////////////////////////////////////////////////////////////////////////
@@ -2371,8 +2376,6 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
             ProcessNewBlock(chainparams, pblock, true, &fNewBlock);
             if (fNewBlock)
                 pfrom->nLastBlockTime = GetTime();
-            LOCK(cs_main); // to test validity
-            MarkBlockAsReceivedIfValid(pblock->GetHash());
         }
     }
 
@@ -2450,8 +2453,6 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
             ProcessNewBlock(chainparams, pblock, true, &fNewBlock);
             if (fNewBlock)
                 pfrom->nLastBlockTime = GetTime();
-            LOCK(cs_main); // to test validity
-            MarkBlockAsReceivedIfValid(pblock->GetHash());
         }
     }
 
@@ -2634,8 +2635,6 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
         ProcessNewBlock(chainparams, pblock, forceProcessing, &fNewBlock);
         if (fNewBlock)
             pfrom->nLastBlockTime = GetTime();
-        LOCK(cs_main); // to test validity
-        MarkBlockAsReceivedIfValid(hash);
     }
 
 
