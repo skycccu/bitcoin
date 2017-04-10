@@ -139,3 +139,55 @@ size_t CScheduler::getQueueInfo(boost::chrono::system_clock::time_point &first,
     }
     return result;
 }
+
+
+void SingleThreadedSchedulerClient::MaybeScheduleProcessQueue() {
+    {
+        LOCK(m_cs_callbacksPending);
+        // Try to avoid scheduling too many copies here, but if we
+        // accidentally have two ProcessQueue's scheduled at once its
+        // not a big deal.
+        if (m_fCallbacksRunning) return;
+        if (m_callbacksPending.empty()) return;
+    }
+    m_pscheduler->schedule(std::bind(&SingleThreadedSchedulerClient::ProcessQueue, this));
+}
+
+void SingleThreadedSchedulerClient::ProcessQueue() {
+    std::function<void (void)> callback;
+    {
+        LOCK(m_cs_callbacksPending);
+        if (m_fCallbacksRunning) return;
+        if (m_callbacksPending.empty()) return;
+        m_fCallbacksRunning = true;
+
+        callback = std::move(m_callbacksPending.front());
+        m_callbacksPending.pop_front();
+    }
+
+    // RAII the setting of fCallbacksRunning and calling MaybeScheduleProcessQueue
+    // to ensure both happen safely even if callback() throws.
+    struct RAIICallbacksRunning {
+        SingleThreadedSchedulerClient* instance;
+        RAIICallbacksRunning(SingleThreadedSchedulerClient* _instance) : instance(_instance) {}
+        ~RAIICallbacksRunning() {
+            {
+                LOCK(instance->m_cs_callbacksPending);
+                instance->m_fCallbacksRunning = false;
+            }
+            instance->MaybeScheduleProcessQueue();
+        }
+    } raiicallbacksrunning(this);
+
+    callback();
+}
+
+void SingleThreadedSchedulerClient::AddToProcessQueue(std::function<void (void)> func) {
+    assert(m_pscheduler);
+
+    {
+        LOCK(m_cs_callbacksPending);
+        m_callbacksPending.emplace_back(std::move(func));
+    }
+    MaybeScheduleProcessQueue();
+}
