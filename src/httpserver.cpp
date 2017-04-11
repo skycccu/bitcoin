@@ -129,12 +129,15 @@ public:
                 i = std::move(queue.front());
                 queue.pop_front();
             }
+LogPrintf("Running an HTTP WorkQueue task\n");
             (*i)();
         }
+LogPrintf("Leaving an HTTP WorkQueue thread!\n");
     }
     /** Interrupt and exit loops */
     void Interrupt()
     {
+LogPrintf("Interrupting HTTP WorkQueue\n");
         std::unique_lock<std::mutex> lock(cs);
         running = false;
         cond.notify_all();
@@ -600,8 +603,10 @@ void HTTPRequest::WriteReply(int nStatus, const std::string& strReply)
     evbuffer_add(evb, strReply.data(), strReply.size());
     HTTPEvent* ev = new HTTPEvent(eventBase, true,
         std::bind(evhttp_send_reply, req, nStatus, (const char*)NULL, (struct evbuffer *)NULL));
+LogPrint("Wrote reply for RPC call, now triggering EV...\n");
     ev->trigger(0);
     replySent = true;
+LogPrint("Sent reply!\n");
     req = 0; // transferred back to main thread
 }
 

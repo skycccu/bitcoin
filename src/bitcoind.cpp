@@ -46,6 +46,7 @@ void WaitForShutdown(boost::thread_group* threadGroup)
     WaitForShutdownRequested();
     if (threadGroup)
     {
+LogPrintf("Interrupting main threadGroup!\n");
         Interrupt(*threadGroup);
         threadGroup->join_all();
     }
