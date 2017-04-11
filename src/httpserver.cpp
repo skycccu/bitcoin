@@ -603,10 +603,10 @@ void HTTPRequest::WriteReply(int nStatus, const std::string& strReply)
     evbuffer_add(evb, strReply.data(), strReply.size());
     HTTPEvent* ev = new HTTPEvent(eventBase, true,
         std::bind(evhttp_send_reply, req, nStatus, (const char*)NULL, (struct evbuffer *)NULL));
-LogPrint("Wrote reply for RPC call, now triggering EV...\n");
+LogPrintf("Wrote reply for RPC call, now triggering EV...\n");
     ev->trigger(0);
     replySent = true;
-LogPrint("Sent reply!\n");
+LogPrintf("Sent reply!\n");
     req = 0; // transferred back to main thread
 }
 
