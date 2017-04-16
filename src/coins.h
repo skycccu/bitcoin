@@ -315,6 +315,11 @@ public:
     //! Retrieve the block hash whose state this CCoinsView currently represents
     virtual uint256 GetBestBlock() const;
 
+    //! Retrieve the block hashes that delimit the subtree of blocks for which
+    //! partial updates may have been written. The first entry is the intended
+    //! tip. Only when GetBestBlock() is not set.
+    virtual std::vector<uint256> GetHeadBlocks() const;
+
     //! Do a bulk modification (multiple CCoins changes + BestBlock change).
     //! The passed mapCoins can be modified.
     virtual bool BatchWrite(CCoinsMap &mapCoins, const uint256 &hashBlock);
@@ -335,12 +340,13 @@ protected:
 
 public:
     CCoinsViewBacked(CCoinsView *viewIn);
-    bool GetCoins(const uint256 &txid, CCoins &coins) const;
-    bool HaveCoins(const uint256 &txid) const;
-    uint256 GetBestBlock() const;
+    bool GetCoins(const uint256 &txid, CCoins &coins) const override;
+    bool HaveCoins(const uint256 &txid) const override;
+    uint256 GetBestBlock() const override;
+    std::vector<uint256> GetHeadBlocks() const override;
     void SetBackend(CCoinsView &viewIn);
-    bool BatchWrite(CCoinsMap &mapCoins, const uint256 &hashBlock);
-    CCoinsViewCursor *Cursor() const;
+    bool BatchWrite(CCoinsMap &mapCoins, const uint256 &hashBlock) override;
+    CCoinsViewCursor *Cursor() const override;
 };
 
 

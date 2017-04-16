@@ -20,6 +20,7 @@ static const char DB_TXINDEX = 't';
 static const char DB_BLOCK_INDEX = 'b';
 
 static const char DB_BEST_BLOCK = 'B';
+static const char DB_HEAD_BLOCKS = 'H';
 static const char DB_FLAG = 'F';
 static const char DB_REINDEX_FLAG = 'R';
 static const char DB_LAST_BLOCK = 'l';
@@ -44,10 +45,33 @@ uint256 CCoinsViewDB::GetBestBlock() const {
     return hashBestChain;
 }
 
+std::vector<uint256> CCoinsViewDB::GetHeadBlocks() const {
+    std::vector<uint256> vhashHeadBlocks;
+    if (!db.Read(DB_HEAD_BLOCKS, vhashHeadBlocks))
+        return std::vector<uint256>();
+    return vhashHeadBlocks;
+}
+
 bool CCoinsViewDB::BatchWrite(CCoinsMap &mapCoins, const uint256 &hashBlock) {
     CDBBatch batch(db);
     size_t count = 0;
     size_t changed = 0;
+    size_t batch_size = (size_t)GetArg("-dbbatchsize", nDefaultDbBatchSize) << 20;
+    if (!hashBlock.IsNull()) {
+        // Read existing heads from database.
+        uint256 tip = GetBestBlock();
+        std::vector<uint256> heads = GetHeadBlocks();
+        // Construct a set with all existing heads, excluding the new tip.
+        std::set<uint256> setHeads(heads.begin(), heads.end());
+        if (setHeads.empty() || !tip.IsNull()) setHeads.insert(tip);
+        setHeads.erase(hashBlock);
+        // Construct a vector with the new tip first, and other heads afterwards.
+        heads.assign(1, hashBlock);
+        heads.insert(heads.end(), setHeads.begin(), setHeads.end());
+        // Write to batch.
+        batch.Erase(DB_BEST_BLOCK);
+        batch.Write(DB_HEAD_BLOCKS, heads);
+    }
     for (CCoinsMap::iterator it = mapCoins.begin(); it != mapCoins.end();) {
         if (it->second.flags & CCoinsCacheEntry::DIRTY) {
             if (it->second.coins.IsPruned())
@@ -59,12 +83,21 @@ bool CCoinsViewDB::BatchWrite(CCoinsMap &mapCoins, const uint256 &hashBlock) {
         count++;
         CCoinsMap::iterator itOld = it++;
         mapCoins.erase(itOld);
+        if (batch.SizeEstimate() > batch_size) {
+            LogPrint(BCLog::COINDB, "Writing partial batch of %.2f MiB\n", batch.SizeEstimate() * (1.0 / 1048576.0));
+            db.WriteBatch(batch);
+            batch.Clear();
+        }
     }
-    if (!hashBlock.IsNull())
+    if (!hashBlock.IsNull()) {
+        batch.Erase(DB_HEAD_BLOCKS);
         batch.Write(DB_BEST_BLOCK, hashBlock);
+    }
 
-    LogPrint(BCLog::COINDB, "Committing %u changed transactions (out of %u) to coin database...\n", (unsigned int)changed, (unsigned int)count);
-    return db.WriteBatch(batch);
+    LogPrint(BCLog::COINDB, "Writing final batch of %.2f MiB\n", batch.SizeEstimate() * (1.0 / 1048576.0));
+    bool ret = db.WriteBatch(batch);
+    LogPrint(BCLog::COINDB, "Committed %u changed transactions (out of %u) to coin database...\n", (unsigned int)changed, (unsigned int)count);
+    return ret;
 }
 
 CBlockTreeDB::CBlockTreeDB(size_t nCacheSize, bool fMemory, bool fWipe) : CDBWrapper(GetDataDir() / "blocks" / "index", nCacheSize, fMemory, fWipe) {

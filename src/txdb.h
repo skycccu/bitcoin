@@ -21,14 +21,14 @@ class CBlockIndex;
 class CCoinsViewDBCursor;
 class uint256;
 
-//! Compensate for extra memory peak (x1.5-x1.9) at flush time.
-static constexpr int DB_PEAK_USAGE_FACTOR = 2;
 //! No need to periodic flush if at least this much space still available.
-static constexpr int MAX_BLOCK_COINSDB_USAGE = 200 * DB_PEAK_USAGE_FACTOR;
+static constexpr int MAX_BLOCK_COINSDB_USAGE = 200;
 //! Always periodic flush if less than this much space still available.
-static constexpr int MIN_BLOCK_COINSDB_USAGE = 50 * DB_PEAK_USAGE_FACTOR;
+static constexpr int MIN_BLOCK_COINSDB_USAGE = 50;
 //! -dbcache default (MiB)
 static const int64_t nDefaultDbCache = 450;
+//! -dbbatchsize default (MiB)
+static const int64_t nDefaultDbBatchSize = 16;
 //! max. -dbcache (MiB)
 static const int64_t nMaxDbCache = sizeof(void*) > 4 ? 16384 : 1024;
 //! min. -dbcache (MiB)
@@ -78,6 +78,7 @@ public:
     bool GetCoins(const uint256 &txid, CCoins &coins) const;
     bool HaveCoins(const uint256 &txid) const;
     uint256 GetBestBlock() const;
+    std::vector<uint256> GetHeadBlocks() const;
     bool BatchWrite(CCoinsMap &mapCoins, const uint256 &hashBlock);
     CCoinsViewCursor *Cursor() const;
 };
