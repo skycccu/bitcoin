@@ -224,6 +224,22 @@ struct CNodeState {
     }
 };
 
+/** Provides locked access to a CNodeState  */
+class NodeStateAccessor {
+private:
+    CNodeState  *m_pstate;
+
+    NodeStateAccessor() : m_pstate(nullptr) { }
+    NodeStateAccessor(CNodeState  *pstateIn) : m_pstate(pstateIn) { }
+    friend class NodeStateStorage;
+
+public:
+    explicit operator bool() const { return (bool)m_pstate; }
+
+    CNodeState  * operator->() { return &(*m_pstate); }
+    const CNodeState  * operator->() const { return &(*m_pstate); }
+};
+
 class NodeStateStorage {
     /** Map maintaining per-node state. Requires cs_main. */
     std::map<NodeId, CNodeState> m_mapNodeState;
