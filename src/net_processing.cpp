@@ -758,24 +758,27 @@ unsigned int LimitOrphanTxSize(unsigned int nMaxOrphans) EXCLUSIVE_LOCKS_REQUIRE
     return nEvicted;
 }
 
-// Requires cs_main.
-void Misbehaving(NodeId pnode, int howmuch)
+void Misbehaving(NodeStateAccessor& state, int howmuch)
 {
     if (howmuch == 0)
-        return;
-
-    NodeStateAccessor state = State(pnode);
-    if (!state)
         return;
 
     state->nMisbehavior += howmuch;
     int banscore = GetArg("-banscore", DEFAULT_BANSCORE_THRESHOLD);
     if (state->nMisbehavior >= banscore && state->nMisbehavior - howmuch < banscore)
     {
-        LogPrintf("%s: %s peer=%d (%d -> %d) BAN THRESHOLD EXCEEDED\n", __func__, state->name, pnode, state->nMisbehavior-howmuch, state->nMisbehavior);
+        LogPrintf("%s: %s peer=%d (%d -> %d) BAN THRESHOLD EXCEEDED\n", __func__, state->name, state->m_id, state->nMisbehavior-howmuch, state->nMisbehavior);
         state->fShouldBan = true;
     } else
-        LogPrintf("%s: %s peer=%d (%d -> %d)\n", __func__, state->name, pnode, state->nMisbehavior-howmuch, state->nMisbehavior);
+        LogPrintf("%s: %s peer=%d (%d -> %d)\n", __func__, state->name, state->m_id, state->nMisbehavior-howmuch, state->nMisbehavior);
+}
+
+// Requires cs_main.
+void Misbehaving(NodeId nodeid, int howmuch)
+{
+    NodeStateAccessor state = State(nodeid);
+    if (!state) return;
+    Misbehaving(state, howmuch);
 }
 
 
@@ -924,7 +927,7 @@ void PeerLogicValidation::BlockChecked(const CBlock& block, const CValidationSta
             CBlockReject reject = {(unsigned char)state.GetRejectCode(), state.GetRejectReason().substr(0, MAX_REJECT_MESSAGE_LENGTH), hash};
             nodestate->rejects.push_back(reject);
             if (nDoS > 0 && it->second.second)
-                Misbehaving(it->second.first, nDoS);
+                Misbehaving(nodestate, nDoS);
         }
     }
     // Check that:
@@ -1934,7 +1937,9 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
                         if (stateDummy.IsInvalid(nDos) && nDos > 0)
                         {
                             // Punish peer that gave us an invalid orphan tx
-                            Misbehaving(fromPeer, nDos);
+                            // TODO: Dont hold two NodeStateAccessors at the same time here
+                            NodeStateAccessor nodestate_fromPeer = State(fromPeer);
+                            Misbehaving(nodestate_fromPeer, nDos);
                             setMisbehaving.insert(fromPeer);
                             LogPrint(BCLog::MEMPOOL, "   invalid orphan tx %s\n", orphanHash.ToString());
                         }
