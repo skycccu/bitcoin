@@ -177,6 +177,9 @@ struct CNodeState {
     int64_t nHeadersSyncTimeout;
     //! Since when we're stalling block download progress (in microseconds), or 0.
     int64_t nStallingSince;
+    // WARNING: Due to lock ordering, vBlocksInFlight MAY have entries which no longer exist
+    // in mmapBlocksInFlight. In such cases, mmapBlocksInFlight is the authoritative source,
+    // as there is a thread somewhere waiting on a lock to remove such entries.
     std::list<QueuedBlock> vBlocksInFlight;
     //! When the first entry in vBlocksInFlight started downloading. Don't care when vBlocksInFlight is empty.
     int64_t nDownloadingSince;
@@ -333,20 +336,20 @@ void InitializeNode(CNode *pnode, CConnman& connman) {
 
 // Requires cs_main
 // Helper function for MarkBlockAsReceived and MarkBlockAsNotInFlight
-static void ClearDownloadState(BlockDownloadMap::iterator itInFlight, NodeStateAccessor& state) {
+static void ClearDownloadState(const std::pair<NodeId, std::list<QueuedBlock>::iterator>& itInFlight, NodeStateAccessor& state) {
     AssertLockHeld(cs_main);
 
-    assert(itInFlight->second.first == state->m_id);
-    state->nBlocksInFlightValidHeaders -= itInFlight->second.second->fValidatedHeaders;
-    if (state->nBlocksInFlightValidHeaders == 0 && itInFlight->second.second->fValidatedHeaders) {
+    assert(itInFlight.first == state->m_id);
+    state->nBlocksInFlightValidHeaders -= itInFlight.second->fValidatedHeaders;
+    if (state->nBlocksInFlightValidHeaders == 0 && itInFlight.second->fValidatedHeaders) {
         // Last validated block on the queue was received.
         nPeersWithValidatedDownloads--;
     }
-    if (state->vBlocksInFlight.begin() == itInFlight->second.second) {
+    if (state->vBlocksInFlight.begin() == itInFlight.second) {
         // First block on the queue was received, update the start download time for the next one
         state->nDownloadingSince = std::max(state->nDownloadingSince, GetTimeMicros());
     }
-    state->vBlocksInFlight.erase(itInFlight->second.second);
+    state->vBlocksInFlight.erase(itInFlight.second);
     state->nBlocksInFlight--;
     state->nStallingSince = 0;
 }
@@ -363,7 +366,7 @@ static void MarkBlockAsNotInFlight(const uint256& hash, NodeStateAccessor& state
         BlockDownloadMap::iterator itInFlight = range.first;
         range.first++;
         if (itInFlight->second.first == state->m_id) {
-            if (clearState) ClearDownloadState(itInFlight, state);
+            if (clearState) ClearDownloadState(itInFlight->second, state);
             mmapBlocksInFlight.erase(itInFlight);
         }
     }
@@ -398,14 +401,23 @@ void FinalizeNode(NodeId nodeid, bool& fUpdateConnectionTime) {
 
 // Returns a bool indicating whether we requested this block.
 bool MarkBlockAsReceived(const uint256& hash) {
-    LOCK(cs_main);
+    std::vector<std::pair<NodeId, std::list<QueuedBlock>::iterator>> queued_blocks_to_remove;
     bool found = false;
-    std::pair<BlockDownloadMap::iterator, BlockDownloadMap::iterator> range = mmapBlocksInFlight.equal_range(hash);
-    while (range.first != range.second) {
-        found = true;
-        NodeStateAccessor nodestate = State(range.first->second.first);
-        ClearDownloadState(range.first, nodestate);
-        range.first = mmapBlocksInFlight.erase(range.first);
+    {
+        LOCK(cs_main);
+        std::pair<BlockDownloadMap::iterator, BlockDownloadMap::iterator> range = mmapBlocksInFlight.equal_range(hash);
+        while (range.first != range.second) {
+            found = true;
+            queued_blocks_to_remove.push_back(range.first->second);
+            range.first = mmapBlocksInFlight.erase(range.first);
+        }
+    } // cs_main
+    {
+        LOCK(cs_main);
+        for (const auto& it : queued_blocks_to_remove) {
+            NodeStateAccessor nodestate = State(it.first);
+            ClearDownloadState(it, nodestate);
+        }
     }
     return found;
 }
@@ -3315,10 +3327,10 @@ bool SendMessages(CNode* pto, CConnman& connman, const std::atomic<bool>& interr
         // being saturated. We only count validated in-flight blocks so peers can't advertise non-existing block hashes
         // to unreasonably increase our timeout.
         if (state->vBlocksInFlight.size() > 0) {
-            QueuedBlock &queuedBlock = state->vBlocksInFlight.front();
+            const uint256& oldest_download_hash = state->vBlocksInFlight.front().hash;
             int nOtherPeersWithValidatedDownloads = nPeersWithValidatedDownloads - (state->nBlocksInFlightValidHeaders > 0);
             if (nNow > state->nDownloadingSince + consensusParams.nPowTargetSpacing * (BLOCK_DOWNLOAD_TIMEOUT_BASE + BLOCK_DOWNLOAD_TIMEOUT_PER_PEER * nOtherPeersWithValidatedDownloads)) {
-                LogPrintf("Timeout downloading block %s from peer=%d, disconnecting\n", queuedBlock.hash.ToString(), pto->GetId());
+                LogPrintf("Timeout downloading block %s from peer=%d, disconnecting\n", oldest_download_hash.ToString(), pto->GetId());
                 pto->fDisconnect = true;
                 return true;
             }
