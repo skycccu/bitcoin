@@ -2922,6 +2922,7 @@ public:
 bool SendMessages(CNode* pto, CConnman& connman, const std::atomic<bool>& interruptMsgProc)
 {
     const Consensus::Params& consensusParams = Params().GetConsensus();
+    NodeId stalling_node = -1;
     {
         // Don't send anything until the version handshake is complete
         if (!pto->fSuccessfullyConnected || pto->fDisconnect)
@@ -3385,10 +3386,7 @@ bool SendMessages(CNode* pto, CConnman& connman, const std::atomic<bool>& interr
                     pindex->nHeight, pto->GetId());
             }
             if (state->nBlocksInFlight == 0 && staller != -1) {
-                if (State(staller)->nStallingSince == 0) {
-                    State(staller)->nStallingSince = nNow;
-                    LogPrint(BCLog::NET, "Stall started peer=%d\n", staller);
-                }
+                stalling_node = staller;
             }
         }
 
@@ -3443,7 +3441,17 @@ bool SendMessages(CNode* pto, CConnman& connman, const std::atomic<bool>& interr
                 pto->nextSendTimeFeeFilter = timeNow + GetRandInt(MAX_FEEFILTER_CHANGE_DELAY) * 1000000;
             }
         }
+    } // cs_main, among other scopes
+
+    LOCK(cs_main);
+    if (stalling_node != -1) {
+        NodeStateAccessor stalling_node_state = State(stalling_node);
+        if (stalling_node_state && stalling_node_state->nStallingSince == 0) {
+            stalling_node_state->nStallingSince = GetTimeMicros();
+            LogPrint(BCLog::NET, "Stall started peer=%d\n", stalling_node);
+        }
     }
+
     return true;
 }
 
