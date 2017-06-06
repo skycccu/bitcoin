@@ -443,10 +443,7 @@ bool MarkBlockAsInFlight(NodeStateAccessor& state, const uint256& hash, const CB
 }
 
 /** Check whether the last unknown block a peer advertised is not yet known. */
-void ProcessBlockAvailability(NodeId nodeid) {
-    NodeStateAccessor state = State(nodeid);
-    assert(state);
-
+void ProcessBlockAvailability(NodeStateAccessor& state) {
     if (!state->hashLastUnknownBlock.IsNull()) {
         BlockMap::iterator itOld = mapBlockIndex.find(state->hashLastUnknownBlock);
         if (itOld != mapBlockIndex.end() && itOld->second->nChainWork > 0) {
@@ -458,11 +455,8 @@ void ProcessBlockAvailability(NodeId nodeid) {
 }
 
 /** Update tracking information about which blocks a peer is assumed to have. */
-void UpdateBlockAvailability(NodeId nodeid, const uint256 &hash) {
-    NodeStateAccessor state = State(nodeid);
-    assert(state);
-
-    ProcessBlockAvailability(nodeid);
+void UpdateBlockAvailability(NodeStateAccessor& state, const uint256 &hash) {
+    ProcessBlockAvailability(state);
 
     BlockMap::iterator it = mapBlockIndex.find(hash);
     if (it != mapBlockIndex.end() && it->second->nChainWork > 0) {
@@ -528,16 +522,14 @@ bool PeerHasHeader(const NodeStateAccessor& state, const CBlockIndex *pindex)
 
 /** Update pindexLastCommonBlock and add not-in-flight missing successors to vBlocks, until it has
  *  at most count entries. */
-void FindNextBlocksToDownload(NodeId nodeid, unsigned int count, std::vector<const CBlockIndex*>& vBlocks, NodeId& nodeStaller, const Consensus::Params& consensusParams) {
+void FindNextBlocksToDownload(NodeStateAccessor& state, unsigned int count, std::vector<const CBlockIndex*>& vBlocks, NodeId& nodeStaller, const Consensus::Params& consensusParams) {
     if (count == 0)
         return;
 
     vBlocks.reserve(vBlocks.size() + count);
-    NodeStateAccessor state = State(nodeid);
-    assert(state);
 
     // Make sure pindexBestKnownBlock is up to date, we'll need it.
-    ProcessBlockAvailability(nodeid);
+    ProcessBlockAvailability(state);
 
     if (state->pindexBestKnownBlock == NULL || state->pindexBestKnownBlock->nChainWork < chainActive.Tip()->nChainWork || state->pindexBestKnownBlock->nChainWork < UintToArith256(consensusParams.nMinimumChainWork)) {
         // This peer has nothing interesting.
@@ -585,7 +577,7 @@ void FindNextBlocksToDownload(NodeId nodeid, unsigned int count, std::vector<con
                 // We consider the chain that this peer is on invalid.
                 return;
             }
-            if (!State(nodeid)->fHaveWitness && IsWitnessEnabled(pindex->pprev, consensusParams)) {
+            if (!state->fHaveWitness && IsWitnessEnabled(pindex->pprev, consensusParams)) {
                 // We wouldn't download this block or its descendants from this peer.
                 return;
             }
@@ -596,7 +588,7 @@ void FindNextBlocksToDownload(NodeId nodeid, unsigned int count, std::vector<con
                 // The block is not already downloaded, and not yet in flight.
                 if (pindex->nHeight > nWindowEnd) {
                     // We reached the end of the window.
-                    if (vBlocks.size() == 0 && waitingfor != nodeid) {
+                    if (vBlocks.size() == 0 && waitingfor != state->m_id) {
                         // We aren't able to fetch anything, but we would be if the download window was one larger.
                         nodeStaller = waitingfor;
                     }
@@ -872,8 +864,8 @@ void PeerLogicValidation::NewPoWValidBlock(const CBlockIndex *pindex, const std:
         // TODO: Avoid the repeated-serialization here
         if (pnode->nVersion < INVALID_CB_NO_BAN_VERSION || pnode->fDisconnect)
             return;
-        ProcessBlockAvailability(pnode->GetId());
         NodeStateAccessor state = State(pnode->GetId());
+        ProcessBlockAvailability(state);
         // If the peer has, or we announced to them the previous block already,
         // but we don't think they have this one, go ahead and announce it
         if (state->fPreferHeaderAndIDs && (!fWitnessEnabled || state->fWantsCmpctWitness) &&
@@ -1614,6 +1606,7 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
             fBlocksOnly = false;
 
         LOCK(cs_main);
+        NodeStateAccessor nodestate = State(pfrom->GetId());
 
         uint32_t nFetchFlags = GetFetchFlags(pfrom);
 
@@ -1630,7 +1623,7 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
             }
 
             if (inv.type == MSG_BLOCK) {
-                UpdateBlockAvailability(pfrom->GetId(), inv.hash);
+                UpdateBlockAvailability(nodestate, inv.hash);
                 if (!fAlreadyHave && !fImporting && !fReindex && !mmapBlocksInFlight.count(inv.hash)) {
                     // We used to request the full block here, but since headers-announcements are now the
                     // primary method of announcement on the network, and since, in the case that a node
@@ -2082,9 +2075,11 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
 
         {
         LOCK(cs_main);
+        NodeStateAccessor nodestate = State(pfrom->GetId());
+
         // If AcceptBlockHeader returned true, it set pindex
         assert(pindex);
-        UpdateBlockAvailability(pfrom->GetId(), pindex->GetBlockHash());
+        UpdateBlockAvailability(nodestate, pindex->GetBlockHash());
 
         std::pair<BlockDownloadMap::iterator, BlockDownloadMap::iterator> rangeInFlight = mmapBlocksInFlight.equal_range(pindex->GetBlockHash());
         bool fAlreadyInFlight = rangeInFlight.first != rangeInFlight.second;
@@ -2113,8 +2108,6 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
         // If we're not close to tip yet, give up and let parallel block fetch work its magic
         if (!fInFlightFromSamePeer && !CanDirectFetch(chainparams.GetConsensus()))
             return true;
-
-        NodeStateAccessor nodestate = State(pfrom->GetId());
 
         if (IsWitnessEnabled(pindex->pprev, chainparams.GetConsensus()) && !nodestate->fSupportsDesiredCmpctVersion) {
             // Don't bother trying to process compact blocks from v1 peers
@@ -2350,7 +2343,7 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
             // Set hashLastUnknownBlock for this peer, so that if we
             // eventually get the headers - even from a different peer -
             // we can use this peer to download.
-            UpdateBlockAvailability(pfrom->GetId(), headers.back().GetHash());
+            UpdateBlockAvailability(nodestate, headers.back().GetHash());
 
             if (nodestate->nUnconnectingHeaders % MAX_UNCONNECTING_HEADERS == 0) {
                 Misbehaving(pfrom->GetId(), 20);
@@ -2389,7 +2382,7 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
         nodestate->nUnconnectingHeaders = 0;
 
         assert(pindexLast);
-        UpdateBlockAvailability(pfrom->GetId(), pindexLast->GetBlockHash());
+        UpdateBlockAvailability(nodestate, pindexLast->GetBlockHash());
 
         if (nCount == MAX_HEADERS_RESULTS) {
             // Headers message had its maximum size; the peer may have more headers.
@@ -2999,7 +2992,7 @@ bool SendMessages(CNode* pto, CConnman& connman, const std::atomic<bool>& interr
                                  (!state->fPreferHeaderAndIDs || pto->vBlockHashesToAnnounce.size() > 1)) ||
                                 pto->vBlockHashesToAnnounce.size() > MAX_BLOCKS_TO_ANNOUNCE);
             const CBlockIndex *pBestIndex = NULL; // last header queued for delivery
-            ProcessBlockAvailability(pto->GetId()); // ensure pindexBestKnownBlock is up-to-date
+            ProcessBlockAvailability(state); // ensure pindexBestKnownBlock is up-to-date
 
             if (!fRevertToInv) {
                 bool fFoundStartingHeader = false;
@@ -3322,7 +3315,7 @@ bool SendMessages(CNode* pto, CConnman& connman, const std::atomic<bool>& interr
         if (!pto->fClient && (fFetch || !IsInitialBlockDownload()) && state->nBlocksInFlight < MAX_BLOCKS_IN_TRANSIT_PER_PEER) {
             std::vector<const CBlockIndex*> vToDownload;
             NodeId staller = -1;
-            FindNextBlocksToDownload(pto->GetId(), MAX_BLOCKS_IN_TRANSIT_PER_PEER - state->nBlocksInFlight, vToDownload, staller, consensusParams);
+            FindNextBlocksToDownload(state, MAX_BLOCKS_IN_TRANSIT_PER_PEER - state->nBlocksInFlight, vToDownload, staller, consensusParams);
             for (const CBlockIndex *pindex : vToDownload) {
                 uint32_t nFetchFlags = GetFetchFlags(pto);
                 vGetData.push_back(CInv(MSG_BLOCK | nFetchFlags, pindex->GetBlockHash()));
