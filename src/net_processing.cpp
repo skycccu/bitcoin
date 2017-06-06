@@ -234,6 +234,11 @@ private:
     friend class NodeStateStorage;
 
 public:
+    NodeStateAccessor(const NodeStateAccessor&) =delete;
+    NodeStateAccessor& operator= (const NodeStateAccessor&) =delete;
+
+    NodeStateAccessor(NodeStateAccessor&& o) { m_pstate = o.m_pstate; o.m_pstate = nullptr; }
+
     explicit operator bool() const { return (bool)m_pstate; }
 
     CNodeState  * operator->() { return &(*m_pstate); }
@@ -276,7 +281,7 @@ public:
 static NodeStateAccessor State(NodeId pnode) {
     return g_nodeStateStorage.GetNodeState(pnode);
 }
-void UpdatePreferredDownload(CNode* node, NodeStateAccessor state)
+void UpdatePreferredDownload(CNode* node, NodeStateAccessor& state)
 {
     nPreferredDownload -= state->fPreferredDownload;
 
@@ -502,7 +507,7 @@ bool CanDirectFetch(const Consensus::Params &consensusParams)
 }
 
 // Requires cs_main
-bool PeerHasHeader(NodeStateAccessor state, const CBlockIndex *pindex)
+bool PeerHasHeader(const NodeStateAccessor& state, const CBlockIndex *pindex)
 {
     if (state->pindexBestKnownBlock && pindex == state->pindexBestKnownBlock->GetAncestor(pindex->nHeight))
         return true;
@@ -1393,7 +1398,8 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
         // Potentially mark this peer as a preferred download peer.
         {
         LOCK(cs_main);
-        UpdatePreferredDownload(pfrom, State(pfrom->GetId()));
+        NodeStateAccessor state = State(pfrom->GetId());
+        UpdatePreferredDownload(pfrom, state);
         }
 
         if (!pfrom->fInbound)
