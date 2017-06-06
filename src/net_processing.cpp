@@ -936,11 +936,12 @@ void PeerLogicValidation::BlockChecked(const CBlock& block, const CValidationSta
     std::map<uint256, std::pair<NodeId, bool>>::iterator it = mapBlockSource.find(hash);
 
     int nDoS = 0;
-    if (state.IsInvalid(nDoS)) {
+    if (state.IsInvalid(nDoS) && it != mapBlockSource.end()) {
+        NodeStateAccessor nodestate = State(it->second.first);
         // Don't send reject message with code 0 or an internal reject code.
-        if (it != mapBlockSource.end() && State(it->second.first) && state.GetRejectCode() > 0 && state.GetRejectCode() < REJECT_INTERNAL) {
+        if (nodestate && state.GetRejectCode() > 0 && state.GetRejectCode() < REJECT_INTERNAL) {
             CBlockReject reject = {(unsigned char)state.GetRejectCode(), state.GetRejectReason().substr(0, MAX_REJECT_MESSAGE_LENGTH), hash};
-            State(it->second.first)->rejects.push_back(reject);
+            nodestate->rejects.push_back(reject);
             if (nDoS > 0 && it->second.second)
                 Misbehaving(it->second.first, nDoS);
         }
@@ -1280,6 +1281,7 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
     {
         if (pfrom->nVersion >= NO_BLOOM_VERSION) {
             LOCK(cs_main);
+            NodeStateAccessor nodestate = State(pfrom->GetId());
             Misbehaving(pfrom->GetId(), 100);
             return false;
         } else {
@@ -1319,6 +1321,7 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
         {
             connman.PushMessage(pfrom, CNetMsgMaker(INIT_PROTO_VERSION).Make(NetMsgType::REJECT, strCommand, REJECT_DUPLICATE, std::string("Duplicate version message")));
             LOCK(cs_main);
+            NodeStateAccessor nodestate = State(pfrom->GetId());
             Misbehaving(pfrom->GetId(), 1);
             return false;
         }
@@ -1484,6 +1487,7 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
     {
         // Must have a version message before anything else
         LOCK(cs_main);
+        NodeStateAccessor nodestate = State(pfrom->GetId());
         Misbehaving(pfrom->GetId(), 1);
         return false;
     }
@@ -1528,6 +1532,7 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
     {
         // Must have a verack message before anything else
         LOCK(cs_main);
+        NodeStateAccessor nodestate = State(pfrom->GetId());
         Misbehaving(pfrom->GetId(), 1);
         return false;
     }
@@ -1543,6 +1548,7 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
         if (vAddr.size() > 1000)
         {
             LOCK(cs_main);
+            NodeStateAccessor nodestate = State(pfrom->GetId());
             Misbehaving(pfrom->GetId(), 20);
             return error("message addr size() = %u", vAddr.size());
         }
@@ -1616,6 +1622,7 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
         if (vInv.size() > MAX_INV_SZ)
         {
             LOCK(cs_main);
+            NodeStateAccessor nodestate = State(pfrom->GetId());
             Misbehaving(pfrom->GetId(), 20);
             return error("message inv size() = %u", vInv.size());
         }
@@ -1678,6 +1685,7 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
         if (vInv.size() > MAX_INV_SZ)
         {
             LOCK(cs_main);
+            NodeStateAccessor nodestate = State(pfrom->GetId());
             Misbehaving(pfrom->GetId(), 20);
             return error("message getdata size() = %u", vInv.size());
         }
@@ -2073,6 +2081,7 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
             if (state.IsInvalid(nDoS)) {
                 if (nDoS > 0) {
                     LOCK(cs_main);
+                    NodeStateAccessor nodestate = State(pfrom->GetId());
                     Misbehaving(pfrom->GetId(), nDoS);
                 }
                 LogPrintf("Peer %d sent us invalid header via cmpctblock\n", pfrom->GetId());
@@ -2329,6 +2338,7 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
         unsigned int nCount = ReadCompactSize(vRecv);
         if (nCount > MAX_HEADERS_RESULTS) {
             LOCK(cs_main);
+            NodeStateAccessor nodestate = State(pfrom->GetId());
             Misbehaving(pfrom->GetId(), 20);
             return error("headers message size = %u", nCount);
         }
@@ -2391,6 +2401,7 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
             if (state.IsInvalid(nDoS)) {
                 if (nDoS > 0) {
                     LOCK(cs_main);
+                    NodeStateAccessor nodestate = State(pfrom->GetId());
                     Misbehaving(pfrom->GetId(), nDoS);
                 }
                 return error("invalid header received");
@@ -2640,6 +2651,7 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
         {
             // There is no excuse for sending a too-large filter
             LOCK(cs_main);
+            NodeStateAccessor nodestate = State(pfrom->GetId());
             Misbehaving(pfrom->GetId(), 100);
         }
         else
@@ -2673,6 +2685,7 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
         }
         if (bad) {
             LOCK(cs_main);
+            NodeStateAccessor nodestate = State(pfrom->GetId());
             Misbehaving(pfrom->GetId(), 100);
         }
     }
