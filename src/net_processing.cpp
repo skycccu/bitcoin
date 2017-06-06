@@ -1041,12 +1041,14 @@ static void RelayAddress(const CAddress& addr, bool fReachable, CConnman& connma
     connman.ForEachNodeThen(std::move(sortfunc), std::move(pushfunc));
 }
 
-void static ProcessGetData(CNode* pfrom, const Consensus::Params& consensusParams, CConnman& connman, const std::atomic<bool>& interruptMsgProc)
+void static ProcessGetData(CNode* pfrom, NodeStateAccessor& nodestate, const Consensus::Params& consensusParams, CConnman& connman, const std::atomic<bool>& interruptMsgProc)
 {
+    AssertLockHeld(cs_main);
+    assert(pfrom->GetId() == nodestate->m_id);
+
     std::deque<CInv>::iterator it = pfrom->vRecvGetData.begin();
     std::vector<CInv> vNotFound;
     const CNetMsgMaker msgMaker(pfrom->GetSendVersion());
-    LOCK(cs_main);
 
     while (it != pfrom->vRecvGetData.end()) {
         // Don't bother if send buffer is too full to respond anyway
@@ -1161,7 +1163,7 @@ void static ProcessGetData(CNode* pfrom, const Consensus::Params& consensusParam
                         // they won't have a useful mempool to match against a compact block,
                         // and we don't feel like constructing the object for them, so
                         // instead we respond with the full, non-compact block.
-                        bool fPeerWantsWitness = State(pfrom->GetId())->fWantsCmpctWitness;
+                        bool fPeerWantsWitness = nodestate->fWantsCmpctWitness;
                         int nSendFlags = fPeerWantsWitness ? 0 : SERIALIZE_TRANSACTION_NO_WITNESS;
                         if (CanDirectFetch(consensusParams) && mi->second->nHeight >= chainActive.Height() - MAX_CMPCTBLOCK_DEPTH) {
                             if ((fPeerWantsWitness || !fWitnessesPresentInARecentCompactBlock) && a_recent_compact_block && a_recent_compact_block->header.GetHash() == mi->second->GetBlockHash()) {
@@ -1692,7 +1694,9 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
         }
 
         pfrom->vRecvGetData.insert(pfrom->vRecvGetData.end(), vInv.begin(), vInv.end());
-        ProcessGetData(pfrom, chainparams.GetConsensus(), connman, interruptMsgProc);
+        LOCK(cs_main);
+        NodeStateAccessor nodestate = State(pfrom->GetId());
+        ProcessGetData(pfrom, nodestate, chainparams.GetConsensus(), connman, interruptMsgProc);
     }
 
 
@@ -1797,7 +1801,7 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
             inv.type = State(pfrom->GetId())->fWantsCmpctWitness ? MSG_WITNESS_BLOCK : MSG_BLOCK;
             inv.hash = req.blockhash;
             pfrom->vRecvGetData.push_back(inv);
-            ProcessGetData(pfrom, chainparams.GetConsensus(), connman, interruptMsgProc);
+            ProcessGetData(pfrom, nodestate, chainparams.GetConsensus(), connman, interruptMsgProc);
             return true;
         }
 
@@ -2725,10 +2729,10 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
     return true;
 }
 
-static bool SendRejectsAndCheckIfBanned(CNode* pnode, CConnman& connman)
+static bool SendRejectsAndCheckIfBanned(CNode* pnode, NodeStateAccessor& state, CConnman& connman)
 {
     AssertLockHeld(cs_main);
-    NodeStateAccessor state = State(pnode->GetId());
+    assert(pnode->GetId() == state->m_id);
 
     for (const CBlockReject& reject : state->rejects) {
         connman.PushMessage(pnode, CNetMsgMaker(INIT_PROTO_VERSION).Make(NetMsgType::REJECT, (std::string)NetMsgType::BLOCK, reject.chRejectCode, reject.strRejectReason, reject.hashBlock));
@@ -2768,8 +2772,11 @@ bool ProcessMessages(CNode* pfrom, CConnman& connman, const std::atomic<bool>& i
     //
     bool fMoreWork = false;
 
-    if (!pfrom->vRecvGetData.empty())
-        ProcessGetData(pfrom, chainparams.GetConsensus(), connman, interruptMsgProc);
+    if (!pfrom->vRecvGetData.empty()) {
+        LOCK(cs_main);
+        NodeStateAccessor state = State(pfrom->GetId());
+        ProcessGetData(pfrom, state, chainparams.GetConsensus(), connman, interruptMsgProc);
+    }
 
     if (pfrom->fDisconnect)
         return false;
@@ -2870,7 +2877,8 @@ bool ProcessMessages(CNode* pfrom, CConnman& connman, const std::atomic<bool>& i
     }
 
     LOCK(cs_main);
-    SendRejectsAndCheckIfBanned(pfrom, connman);
+    NodeStateAccessor nodestate = State(pfrom->GetId());
+    SendRejectsAndCheckIfBanned(pfrom, nodestate, connman);
 
     return fMoreWork;
 }
@@ -2936,9 +2944,9 @@ bool SendMessages(CNode* pto, CConnman& connman, const std::atomic<bool>& interr
         if (!lockMain)
             return true;
 
-        if (SendRejectsAndCheckIfBanned(pto, connman))
-            return true;
         NodeStateAccessor state = State(pto->GetId());
+        if (SendRejectsAndCheckIfBanned(pto, state, connman))
+            return true;
 
         // Address refresh broadcast
         int64_t nNow = GetTimeMicros();
