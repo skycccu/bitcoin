@@ -1256,7 +1256,7 @@ inline void static SendBlockTransactions(const CBlock& block, const BlockTransac
     for (size_t i = 0; i < req.indexes.size(); i++) {
         if (req.indexes[i] >= block.vtx.size()) {
             LOCK(cs_main);
-            Misbehaving(pfrom->GetId(), 100);
+            Misbehaving(nodestate, 100);
             LogPrintf("Peer %d sent us a getblocktxn with out-of-bounds tx indices", pfrom->GetId());
             return;
         }
@@ -1285,7 +1285,7 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
         if (pfrom->nVersion >= NO_BLOOM_VERSION) {
             LOCK(cs_main);
             NodeStateAccessor nodestate = State(pfrom->GetId());
-            Misbehaving(pfrom->GetId(), 100);
+            Misbehaving(nodestate, 100);
             return false;
         } else {
             pfrom->fDisconnect = true;
@@ -1325,7 +1325,7 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
             connman.PushMessage(pfrom, CNetMsgMaker(INIT_PROTO_VERSION).Make(NetMsgType::REJECT, strCommand, REJECT_DUPLICATE, std::string("Duplicate version message")));
             LOCK(cs_main);
             NodeStateAccessor nodestate = State(pfrom->GetId());
-            Misbehaving(pfrom->GetId(), 1);
+            Misbehaving(nodestate, 1);
             return false;
         }
 
@@ -1491,7 +1491,7 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
         // Must have a version message before anything else
         LOCK(cs_main);
         NodeStateAccessor nodestate = State(pfrom->GetId());
-        Misbehaving(pfrom->GetId(), 1);
+        Misbehaving(nodestate, 1);
         return false;
     }
 
@@ -1536,7 +1536,7 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
         // Must have a verack message before anything else
         LOCK(cs_main);
         NodeStateAccessor nodestate = State(pfrom->GetId());
-        Misbehaving(pfrom->GetId(), 1);
+        Misbehaving(nodestate, 1);
         return false;
     }
 
@@ -1552,7 +1552,7 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
         {
             LOCK(cs_main);
             NodeStateAccessor nodestate = State(pfrom->GetId());
-            Misbehaving(pfrom->GetId(), 20);
+            Misbehaving(nodestate, 20);
             return error("message addr size() = %u", vAddr.size());
         }
 
@@ -1626,7 +1626,7 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
         {
             LOCK(cs_main);
             NodeStateAccessor nodestate = State(pfrom->GetId());
-            Misbehaving(pfrom->GetId(), 20);
+            Misbehaving(nodestate, 20);
             return error("message inv size() = %u", vInv.size());
         }
 
@@ -1689,7 +1689,7 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
         {
             LOCK(cs_main);
             NodeStateAccessor nodestate = State(pfrom->GetId());
-            Misbehaving(pfrom->GetId(), 20);
+            Misbehaving(nodestate, 20);
             return error("message getdata size() = %u", vInv.size());
         }
 
@@ -2057,7 +2057,7 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
                 connman.PushMessage(pfrom, msgMaker.Make(NetMsgType::REJECT, strCommand, (unsigned char)state.GetRejectCode(),
                                    state.GetRejectReason().substr(0, MAX_REJECT_MESSAGE_LENGTH), inv.hash));
             if (nDoS > 0) {
-                Misbehaving(pfrom->GetId(), nDoS);
+                Misbehaving(nodestate, nDoS);
             }
         }
     }
@@ -2087,7 +2087,7 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
                 if (nDoS > 0) {
                     LOCK(cs_main);
                     NodeStateAccessor nodestate = State(pfrom->GetId());
-                    Misbehaving(pfrom->GetId(), nDoS);
+                    Misbehaving(nodestate, nDoS);
                 }
                 LogPrintf("Peer %d sent us invalid header via cmpctblock\n", pfrom->GetId());
                 return true;
@@ -2173,7 +2173,7 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
                 ReadStatus status = partialBlock.InitData(cmpctblock, vExtraTxnForCompact);
                 if (status == READ_STATUS_INVALID) {
                     MarkBlockAsNotInFlight(pindex->GetBlockHash(), nodestate); // Reset in-flight state in case of whitelist
-                    Misbehaving(pfrom->GetId(), 100);
+                    Misbehaving(nodestate, 100);
                     LogPrintf("Peer %d sent us invalid compact block\n", pfrom->GetId());
                     return true;
                 } else if (status == READ_STATUS_FAILED) {
@@ -2288,7 +2288,7 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
             ReadStatus status = partialBlock.FillBlock(*pblock, resp.txn);
             if (status == READ_STATUS_INVALID) {
                 MarkBlockAsNotInFlight(resp.blockhash, nodestate); // Reset in-flight state in case of whitelist
-                Misbehaving(pfrom->GetId(), 100);
+                Misbehaving(nodestate, 100);
                 LogPrintf("Peer %d sent us invalid compact block/non-matching block transactions\n", pfrom->GetId());
                 return true;
             } else if (status == READ_STATUS_FAILED) {
@@ -2344,7 +2344,7 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
         if (nCount > MAX_HEADERS_RESULTS) {
             LOCK(cs_main);
             NodeStateAccessor nodestate = State(pfrom->GetId());
-            Misbehaving(pfrom->GetId(), 20);
+            Misbehaving(nodestate, 20);
             return error("headers message size = %u", nCount);
         }
         headers.resize(nCount);
@@ -2385,7 +2385,7 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
             UpdateBlockAvailability(nodestate, headers.back().GetHash());
 
             if (nodestate->nUnconnectingHeaders % MAX_UNCONNECTING_HEADERS == 0) {
-                Misbehaving(pfrom->GetId(), 20);
+                Misbehaving(nodestate, 20);
             }
             return true;
         }
@@ -2393,7 +2393,7 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
         uint256 hashLastBlock;
         for (const CBlockHeader& header : headers) {
             if (!hashLastBlock.IsNull() && header.hashPrevBlock != hashLastBlock) {
-                Misbehaving(pfrom->GetId(), 20);
+                Misbehaving(nodestate, 20);
                 return error("non-continuous headers sequence");
             }
             hashLastBlock = header.GetHash();
@@ -2407,7 +2407,7 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
                 if (nDoS > 0) {
                     LOCK(cs_main);
                     NodeStateAccessor nodestate = State(pfrom->GetId());
-                    Misbehaving(pfrom->GetId(), nDoS);
+                    Misbehaving(nodestate, nDoS);
                 }
                 return error("invalid header received");
             }
@@ -2657,7 +2657,7 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
             // There is no excuse for sending a too-large filter
             LOCK(cs_main);
             NodeStateAccessor nodestate = State(pfrom->GetId());
-            Misbehaving(pfrom->GetId(), 100);
+            Misbehaving(nodestate, 100);
         }
         else
         {
@@ -2691,7 +2691,7 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
         if (bad) {
             LOCK(cs_main);
             NodeStateAccessor nodestate = State(pfrom->GetId());
-            Misbehaving(pfrom->GetId(), 100);
+            Misbehaving(nodestate, 100);
         }
     }
 
