@@ -758,7 +758,7 @@ unsigned int LimitOrphanTxSize(unsigned int nMaxOrphans) EXCLUSIVE_LOCKS_REQUIRE
     return nEvicted;
 }
 
-void Misbehaving(NodeStateAccessor& state, int howmuch)
+static void Misbehaving(NodeStateAccessor& state, int howmuch)
 {
     if (howmuch == 0)
         return;
@@ -771,14 +771,6 @@ void Misbehaving(NodeStateAccessor& state, int howmuch)
         state->fShouldBan = true;
     } else
         LogPrintf("%s: %s peer=%d (%d -> %d)\n", __func__, state->name, state->m_id, state->nMisbehavior-howmuch, state->nMisbehavior);
-}
-
-// Requires cs_main.
-void Misbehaving(NodeId nodeid, int howmuch)
-{
-    NodeStateAccessor state = State(nodeid);
-    if (!state) return;
-    Misbehaving(state, howmuch);
 }
 
 
@@ -3419,3 +3411,16 @@ public:
         mapOrphanTransactionsByPrev.clear();
     }
 } instance_of_cnetprocessingcleanup;
+
+// Wrapper for Misbehaving for DoS_tests.
+// This is deliberately defined at the end as it should not be used anywhere
+// outside of tests, due to breaking our lock order.
+// It is also not defined in headers on purpose to ensure it is not defined
+// for use at any point in this file.
+void Misbehaving(NodeId nodeid, int howmuch)
+{
+    LOCK(cs_main);
+    NodeStateAccessor state = State(nodeid);
+    if (!state) return;
+    Misbehaving(state, howmuch);
+}

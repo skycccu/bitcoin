@@ -30,6 +30,7 @@ struct COrphanTx {
     int64_t nTimeExpire;
 };
 extern std::map<uint256, COrphanTx> mapOrphanTransactions;
+void Misbehaving(NodeId nodeid, int howmuch);
 
 CService ip(uint32_t i)
 {
