@@ -853,6 +853,10 @@ void PeerLogicValidation::NewPoWValidBlock(const CBlockIndex *pindex, const std:
     std::shared_ptr<const CBlockHeaderAndShortTxIDs> pcmpctblock = std::make_shared<const CBlockHeaderAndShortTxIDs> (*pblock, true);
     const CNetMsgMaker msgMaker(PROTOCOL_VERSION);
 
+    uint256 hashBlock(pblock->GetHash());
+    bool fWitnessEnabled;
+
+    {
     LOCK(cs_main);
 
     static int nHighestFastAnnounce = 0;
@@ -860,8 +864,7 @@ void PeerLogicValidation::NewPoWValidBlock(const CBlockIndex *pindex, const std:
         return;
     nHighestFastAnnounce = pindex->nHeight;
 
-    bool fWitnessEnabled = IsWitnessEnabled(pindex->pprev, Params().GetConsensus());
-    uint256 hashBlock(pblock->GetHash());
+    fWitnessEnabled = IsWitnessEnabled(pindex->pprev, Params().GetConsensus());
 
     {
         LOCK(cs_most_recent_block);
@@ -870,11 +873,13 @@ void PeerLogicValidation::NewPoWValidBlock(const CBlockIndex *pindex, const std:
         most_recent_compact_block = pcmpctblock;
         fWitnessesPresentInMostRecentCompactBlock = fWitnessEnabled;
     }
+    } // cs_main
 
     connman->ForEachNode([this, &pcmpctblock, pindex, &msgMaker, fWitnessEnabled, &hashBlock](CNode* pnode) {
         // TODO: Avoid the repeated-serialization here
         if (pnode->nVersion < INVALID_CB_NO_BAN_VERSION || pnode->fDisconnect)
             return;
+        LOCK(cs_main);
         NodeStateAccessor state = State(pnode->GetId());
         ProcessBlockAvailability(state);
         // If the peer has, or we announced to them the previous block already,
