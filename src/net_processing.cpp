@@ -932,12 +932,12 @@ void PeerLogicValidation::UpdatedBlockTip(const CBlockIndex *pindexNew, const CB
     nTimeBestReceived = GetTime();
 }
 
-void PeerLogicValidation::BlockChecked(const CBlock& block, const CValidationState& state) {
+void PeerLogicValidation::BlockChecked(const std::shared_ptr<const CBlock>& pblock, const CValidationState& state) {
     NodeId node = -1;
     bool set_fast_relay = false;
     CBlockReject reject;
     int nDoS = 0;
-    const uint256 hash(block.GetHash());
+    const uint256 hash(pblock->GetHash());
 
     {
     LOCK(cs_main);

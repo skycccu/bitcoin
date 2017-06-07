@@ -678,8 +678,8 @@ public:
     submitblock_StateCatcher(const uint256 &hashIn) : hash(hashIn), found(false), state() {}
 
 protected:
-    void BlockChecked(const CBlock& block, const CValidationState& stateIn) override {
-        if (block.GetHash() != hash)
+    void BlockChecked(const std::shared_ptr<const CBlock>& pblock, const CValidationState& stateIn) override {
+        if (pblock->GetHash() != hash)
             return;
         found = true;
         state = stateIn;
