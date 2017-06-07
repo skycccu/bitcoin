@@ -60,15 +60,20 @@ protected:
      * If the provided CValidationState IsValid, the provided block
      * is guaranteed to be the current best block at the time the
      * callback was generated (not necessarily now)
+     *
+     * Called on a background thread.
      */
-    virtual void BlockChecked(const CBlock&, const CValidationState&) {}
+    virtual void BlockChecked(const std::shared_ptr<const CBlock>&, const CValidationState&) {}
     /** Notifies listeners that a key for mining is required (coinbase) */
     virtual void GetScriptForMining(std::shared_ptr<CReserveScript>&) {};
     /**
      * Notifies listeners that a block which builds directly on our current tip
      * has been received and connected to the headers tree, though not validated yet.
      * If the new block builds on the current best tip, the final bool argument is
-     * set to true, otherwise it is false. */
+     * set to true, otherwise it is false.
+     *
+     * Called on a background thread.
+     */
     virtual void NewPoWValidBlock(const CBlockIndex *pindex, const std::shared_ptr<const CBlock>& block, bool fNewCandidateTip) {};
     friend void ::RegisterValidationInterface(CValidationInterface*);
     friend void ::UnregisterValidationInterface(CValidationInterface*);
@@ -99,7 +104,7 @@ public:
     void SetBestChain(const CBlockLocator &);
     void Inventory(const uint256 &);
     void Broadcast(int64_t nBestBlockTime, CConnman* connman);
-    void BlockChecked(const CBlock&, const CValidationState&);
+    void BlockChecked(const std::shared_ptr<const CBlock>&, const CValidationState&);
     void ScriptForMining(std::shared_ptr<CReserveScript>&);
     void NewPoWValidBlock(const CBlockIndex *, const std::shared_ptr<const CBlock>&, bool);
 };

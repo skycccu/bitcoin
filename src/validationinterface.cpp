@@ -3,6 +3,7 @@
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
+#include "consensus/validation.h"
 #include "validationinterface.h"
 #include "init.h"
 #include "scheduler.h"
@@ -22,7 +23,7 @@ struct MainSignalsInstance {
     boost::signals2::signal<void (const CBlockLocator &)> SetBestChain;
     boost::signals2::signal<void (const uint256 &)> Inventory;
     boost::signals2::signal<void (int64_t nBestBlockTime, CConnman* connman)> Broadcast;
-    boost::signals2::signal<void (const CBlock&, const CValidationState&)> BlockChecked;
+    boost::signals2::signal<void (const std::shared_ptr<const CBlock>&, const CValidationState&)> BlockChecked;
     boost::signals2::signal<void (std::shared_ptr<CReserveScript>&)> ScriptForMining;
     boost::signals2::signal<void (const CBlockIndex *, const std::shared_ptr<const CBlock>&, bool)> NewPoWValidBlock;
 
@@ -121,8 +122,10 @@ void CMainSignals::Broadcast(int64_t nBestBlockTime, CConnman* connman) {
     m_internals->Broadcast(nBestBlockTime, connman);
 }
 
-void CMainSignals::BlockChecked(const CBlock& block, const CValidationState& state) {
-    m_internals->BlockChecked(block, state);
+void CMainSignals::BlockChecked(const std::shared_ptr<const CBlock>& pblock, const CValidationState& state) {
+    m_internals->m_schedulerClient.AddToProcessQueue([pblock, state, this] {
+        m_internals->BlockChecked(pblock, state);
+    });
 }
 
 void CMainSignals::ScriptForMining(std::shared_ptr<CReserveScript>& pscript) {
@@ -130,5 +133,7 @@ void CMainSignals::ScriptForMining(std::shared_ptr<CReserveScript>& pscript) {
 }
 
 void CMainSignals::NewPoWValidBlock(const CBlockIndex *pindex, const std::shared_ptr<const CBlock> &block, bool fNewCandidateTip) {
-    m_internals->NewPoWValidBlock(pindex, block, fNewCandidateTip);
+    m_internals->m_schedulerClient.AddToProcessQueue([pindex, block, fNewCandidateTip, this] {
+        m_internals->NewPoWValidBlock(pindex, block, fNewCandidateTip);
+    });
 }
