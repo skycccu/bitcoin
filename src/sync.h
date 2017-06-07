@@ -191,6 +191,11 @@ typedef CMutexLock<CCriticalSection> CCriticalBlock;
         LeaveCritical((void*)(&cs)); \
     }
 
+// Useful macros to pretend a lock (or arbitrary pointer) is locked/unlocked.
+// These allow you to also AssertLockHeld/AssertLockNotHeld
+#define DEBUG_SET_LOCKED_FLAG(cs) EnterCritical(#cs, __FILE__, __LINE__, (void*)(&cs))
+#define DEBUG_SET_UNLOCKED_FLAG(cs) LeaveCritical((void*)(&cs))
+
 class CSemaphore
 {
 private:
