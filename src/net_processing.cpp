@@ -238,17 +238,30 @@ struct CNodeState {
     }
 };
 
+// We use a dummy object to let DEBUG_LOCKORDER macros assert that
+// no two NodeStateAccessors exist at any one time
+static bool g_nodestate_dummy_lock;
+
 /** Provides locked access to a CNodeState */
 class NodeStateAccessor {
 private:
     std::shared_ptr<CNodeState> m_pstate;
 
     NodeStateAccessor() : m_pstate(nullptr) { }
-    NodeStateAccessor(std::shared_ptr<CNodeState> pstateIn) : m_pstate(std::move(pstateIn)) { ENTER_CRITICAL_SECTION(m_pstate->m_cs); }
+    NodeStateAccessor(std::shared_ptr<CNodeState> pstateIn) : m_pstate(std::move(pstateIn)) {
+        ENTER_CRITICAL_SECTION(m_pstate->m_cs);
+        AssertLockNotHeld(g_nodestate_dummy_lock);
+        DEBUG_SET_LOCKED_FLAG(g_nodestate_dummy_lock);
+    }
     friend class NodeStateStorage;
 
 public:
-    ~NodeStateAccessor() { if (m_pstate) LEAVE_CRITICAL_SECTION(m_pstate->m_cs); }
+    ~NodeStateAccessor() {
+        if (m_pstate) {
+            DEBUG_SET_UNLOCKED_FLAG(g_nodestate_dummy_lock);
+            LEAVE_CRITICAL_SECTION(m_pstate->m_cs);
+        }
+    }
 
     NodeStateAccessor(const NodeStateAccessor&) =delete;
     NodeStateAccessor& operator= (const NodeStateAccessor&) =delete;
@@ -268,6 +281,8 @@ class NodeStateStorage {
 
 public:
     NodeStateAccessor GetNodeState(NodeId nodeid) {
+        AssertLockNotHeld(cs_main);
+
         std::shared_ptr<CNodeState> pstate;
         {
             LOCK(m_cs);
@@ -280,13 +295,16 @@ public:
     }
 
     void AddStateForNode(NodeId nodeid, const CAddress& addr, std::string addrName) {
+        AssertLockNotHeld(cs_main);
+
         LOCK(m_cs);
         m_mapNodeState.emplace_hint(m_mapNodeState.end(), nodeid, std::make_shared<CNodeState>(nodeid, addr, std::move(addrName)));
     }
 
     void RemoveStateForNode(NodeId nodeid) {
-        LOCK(m_cs);
+        AssertLockNotHeld(cs_main);
 
+        LOCK(m_cs);
         auto it = m_mapNodeState.find(nodeid);
         if (it == m_mapNodeState.end())
             return;
