@@ -26,6 +26,7 @@
 
 #include <memory>
 #include <stdint.h>
+#include <future>
 
 #include <univalue.h>
 
@@ -781,6 +782,14 @@ UniValue submitblock(const JSONRPCRequest& request)
     submitblock_StateCatcher sc(block.GetHash());
     RegisterValidationInterface(&sc);
     bool fAccepted = ProcessNewBlock(Params(), blockptr, true, NULL);
+
+    // Block until all callbacks we may have generated complete
+    std::promise<void> promise;
+    CallFunctionInValidationInterfaceQueue([&promise] {
+        promise.set_value();
+    });
+    promise.get_future().wait();
+
     UnregisterValidationInterface(&sc);
     if (fBlockPresent) {
         if (fAccepted && !sc.found) {
