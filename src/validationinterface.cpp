@@ -89,6 +89,10 @@ void UnregisterAllValidationInterfaces() {
     g_signals.m_internals->NewPoWValidBlock.disconnect_all_slots();
 }
 
+void CallFunctionInValidationInterfaceQueue(std::function<void ()> func) {
+    g_signals.m_internals->m_schedulerClient.AddToProcessQueue(std::move(func));
+}
+
 void CMainSignals::UpdatedBlockTip(const CBlockIndex *pindexNew, const CBlockIndex *pindexFork, bool fInitialDownload) {
     m_internals->UpdatedBlockTip(pindexNew, pindexFork, fInitialDownload);
 }
