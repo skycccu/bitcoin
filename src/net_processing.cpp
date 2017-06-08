@@ -207,6 +207,11 @@ struct CNodeState {
      */
     bool fSupportsDesiredCmpctVersion;
 
+    /**
+     * If this node is waiting on validationinterface callbacks to complete before it can make more progress.
+     */
+    bool m_awaiting_callback_completion;
+
     CNodeState(NodeId idIn, CAddress addrIn, std::string addrNameIn) : m_id(idIn), address(addrIn), name(addrNameIn) {
         fCurrentlyConnected = false;
         nMisbehavior = 0;
@@ -229,6 +234,7 @@ struct CNodeState {
         fHaveWitness = false;
         fWantsCmpctWitness = false;
         fSupportsDesiredCmpctVersion = false;
+        m_awaiting_callback_completion = false;
     }
 };
 
@@ -2795,6 +2801,15 @@ bool ProcessMessages(CNode* pfrom, CConnman& connman, const std::atomic<bool>& i
     //
     bool fMoreWork = false;
 
+    {
+        LOCK(cs_main);
+        NodeStateAccessor nodestate = State(pfrom->GetId());
+        if (nodestate->m_awaiting_callback_completion) {
+            // No more work to do, let the callback WakeMessageHandler()
+            return false;
+        }
+    }
+
     if (!pfrom->vRecvGetData.empty()) {
         LOCK(cs_main);
         NodeStateAccessor state = State(pfrom->GetId());
@@ -2906,7 +2921,27 @@ bool ProcessMessages(CNode* pfrom, CConnman& connman, const std::atomic<bool>& i
         Misbehaving(nodestate, entry.second);
     }
     NodeStateAccessor nodestate = State(pfrom->GetId());
-    SendRejectsAndCheckIfBanned(pfrom, nodestate, connman);
+
+    //TODO: We should set m_awaiting_callback_completion in ProcessMessage only when needed
+    nodestate->m_awaiting_callback_completion = true;
+
+    if (nodestate->m_awaiting_callback_completion) {
+        pfrom->AddRef();
+        CallFunctionInValidationInterfaceQueue([&connman, pfrom] {
+            LOCK(cs_main);
+            NodeStateAccessor nodestate = State(pfrom->GetId());
+            if (nodestate) {
+                // The callbacks may have resulted in new reject messages to send
+                // or in new DoS points, so check flush rejects and check ban.
+                SendRejectsAndCheckIfBanned(pfrom, nodestate, connman);
+                nodestate->m_awaiting_callback_completion = false;
+                connman.WakeMessageHandler();
+            }
+            pfrom->Release();
+        });
+    } else {
+        SendRejectsAndCheckIfBanned(pfrom, nodestate, connman);
+    }
 
     return fMoreWork;
 }
@@ -2974,6 +3009,9 @@ bool SendMessages(CNode* pto, CConnman& connman, const std::atomic<bool>& interr
             return true;
 
         NodeStateAccessor state = State(pto->GetId());
+        if (state->m_awaiting_callback_completion) {
+            return true;
+        }
         if (SendRejectsAndCheckIfBanned(pto, state, connman))
             return true;
 
