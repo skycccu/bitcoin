@@ -143,6 +143,9 @@ struct CBlockReject {
  * and we're no longer holding the node's locks.
  */
 struct CNodeState {
+    //! The NodeId which is assocated with this state
+    const NodeId m_id;
+
     //! The peer's address
     const CService address;
     //! Whether we have a fully established connection.
@@ -198,7 +201,7 @@ struct CNodeState {
      */
     bool fSupportsDesiredCmpctVersion;
 
-    CNodeState(CAddress addrIn, std::string addrNameIn) : address(addrIn), name(addrNameIn) {
+    CNodeState(NodeId idIn, CAddress addrIn, std::string addrNameIn) : m_id(idIn), address(addrIn), name(addrNameIn) {
         fCurrentlyConnected = false;
         nMisbehavior = 0;
         fShouldBan = false;
@@ -267,7 +270,7 @@ public:
     void AddStateForNode(NodeId nodeid, const CAddress& addr, std::string addrName) {
         LOCK(cs_main); // TODO: Remove State reliance on cs_main
         LOCK(m_cs);
-        m_mapNodeState.emplace_hint(m_mapNodeState.end(), nodeid, std::make_shared<CNodeState>(addr, std::move(addrName)));
+        m_mapNodeState.emplace_hint(m_mapNodeState.end(), nodeid, std::make_shared<CNodeState>(nodeid, addr, std::move(addrName)));
     }
 
     void RemoveStateForNode(NodeId nodeid) {
@@ -325,10 +328,10 @@ void InitializeNode(CNode *pnode, CConnman& connman) {
 
 // Requires cs_main
 // Helper function for MarkBlockAsReceived and MarkBlockAsNotInFlight
-static void ClearDownloadState(BlockDownloadMap::iterator itInFlight) {
+static void ClearDownloadState(BlockDownloadMap::iterator itInFlight, NodeStateAccessor& state) {
     AssertLockHeld(cs_main);
 
-    NodeStateAccessor state = State(itInFlight->second.first);
+    assert(itInFlight->second.first == state->m_id);
     state->nBlocksInFlightValidHeaders -= itInFlight->second.second->fValidatedHeaders;
     if (state->nBlocksInFlightValidHeaders == 0 && itInFlight->second.second->fValidatedHeaders) {
         // Last validated block on the queue was received.
@@ -347,16 +350,16 @@ static void ClearDownloadState(BlockDownloadMap::iterator itInFlight) {
 // Used to remove block from mmapBlocksInFlight and clear the download state for
 // a block if for some reason block was not received. Download state clearing is
 // skipped as an optimization in FinalizeNode.
-static void MarkBlockAsNotInFlight(const uint256& hash, NodeId nodeid, bool clearState = true) {
+static void MarkBlockAsNotInFlight(const uint256& hash, NodeStateAccessor& state, bool clearState = true) {
     AssertLockHeld(cs_main);
 
     std::pair<BlockDownloadMap::iterator, BlockDownloadMap::iterator> range = mmapBlocksInFlight.equal_range(hash);
     while (range.first != range.second) {
         BlockDownloadMap::iterator itInFlight = range.first;
         range.first++;
-        if (itInFlight->second.first == nodeid) {
+        if (itInFlight->second.first == state->m_id) {
             if (clearState)
-                ClearDownloadState(itInFlight);
+                ClearDownloadState(itInFlight, state);
             mmapBlocksInFlight.erase(itInFlight);
         }
     }
@@ -376,7 +379,7 @@ void FinalizeNode(NodeId nodeid, bool& fUpdateConnectionTime) {
         }
 
         for (const QueuedBlock& entry : state->vBlocksInFlight) {
-            MarkBlockAsNotInFlight(entry.hash, nodeid, false);
+            MarkBlockAsNotInFlight(entry.hash, state, false);
         }
         EraseOrphansFor(nodeid);
         nPreferredDownload -= state->fPreferredDownload;
@@ -396,7 +399,8 @@ bool MarkBlockAsReceived(const uint256& hash) {
     std::pair<BlockDownloadMap::iterator, BlockDownloadMap::iterator> range = mmapBlocksInFlight.equal_range(hash);
     while (range.first != range.second) {
         found = true;
-        ClearDownloadState(range.first);
+        NodeStateAccessor nodestate = State(range.first->second.first);
+        ClearDownloadState(range.first, nodestate);
         range.first = mmapBlocksInFlight.erase(range.first);
     }
     return found;
@@ -405,17 +409,15 @@ bool MarkBlockAsReceived(const uint256& hash) {
 // Requires cs_main.
 // returns false, still setting pit, if the block was already in flight from the same peer
 // pit will only be valid as long as the same cs_main lock is being held
-bool MarkBlockAsInFlight(NodeId nodeid, const uint256& hash, const CBlockIndex* pindex = NULL, std::list<QueuedBlock>::iterator** pit = NULL) {
+bool MarkBlockAsInFlight(NodeStateAccessor& state, const uint256& hash, const CBlockIndex* pindex = NULL, std::list<QueuedBlock>::iterator** pit = NULL) {
     AssertLockHeld(cs_main);
-    NodeStateAccessor state = State(nodeid);
-    assert(state);
 
     // Short-circuit most stuff in case its from the same node
     std::pair<BlockDownloadMap::iterator, BlockDownloadMap::iterator> range = mmapBlocksInFlight.equal_range(hash);
     while (range.first != range.second) {
         BlockDownloadMap::iterator itInFlight = range.first;
         range.first++;
-        if (itInFlight->second.first == nodeid) {
+        if (itInFlight->second.first == state->m_id) {
             if (pit) {
                 *pit = &itInFlight->second.second;
             }
@@ -434,7 +436,7 @@ bool MarkBlockAsInFlight(NodeId nodeid, const uint256& hash, const CBlockIndex* 
     if (state->nBlocksInFlightValidHeaders == 1 && pindex != NULL) {
         nPeersWithValidatedDownloads++;
     }
-    BlockDownloadMap::iterator itInFlight = mmapBlocksInFlight.insert(std::make_pair(hash, std::make_pair(nodeid, it)));
+    BlockDownloadMap::iterator itInFlight = mmapBlocksInFlight.insert(std::make_pair(hash, std::make_pair(state->m_id, it)));
     if (pit)
         *pit = &itInFlight->second.second;
     return true;
@@ -2145,7 +2147,7 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
             if ((!fAlreadyInFlight && nodestate->nBlocksInFlight < MAX_BLOCKS_IN_TRANSIT_PER_PEER) ||
                 fInFlightFromSamePeer) {
                 std::list<QueuedBlock>::iterator *queuedBlockIt = NULL;
-                if (!MarkBlockAsInFlight(pfrom->GetId(), pindex->GetBlockHash(), pindex, &queuedBlockIt)) {
+                if (!MarkBlockAsInFlight(nodestate, pindex->GetBlockHash(), pindex, &queuedBlockIt)) {
                     if (!(*queuedBlockIt)->partialBlock)
                         (*queuedBlockIt)->partialBlock.reset(new PartiallyDownloadedBlock(&mempool));
                     else {
@@ -2158,7 +2160,7 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
                 PartiallyDownloadedBlock& partialBlock = *(*queuedBlockIt)->partialBlock;
                 ReadStatus status = partialBlock.InitData(cmpctblock, vExtraTxnForCompact);
                 if (status == READ_STATUS_INVALID) {
-                    MarkBlockAsNotInFlight(pindex->GetBlockHash(), pfrom->GetId()); // Reset in-flight state in case of whitelist
+                    MarkBlockAsNotInFlight(pindex->GetBlockHash(), nodestate); // Reset in-flight state in case of whitelist
                     Misbehaving(pfrom->GetId(), 100);
                     LogPrintf("Peer %d sent us invalid compact block\n", pfrom->GetId());
                     return true;
@@ -2251,6 +2253,7 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
         bool fBlockRead = false;
         {
             LOCK(cs_main);
+            NodeStateAccessor nodestate = State(pfrom->GetId());
 
             bool fExpectedBLOCKTXN = false;
             std::pair<BlockDownloadMap::iterator, BlockDownloadMap::iterator> rangeInFlight = mmapBlocksInFlight.equal_range(resp.blockhash);
@@ -2272,7 +2275,7 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
             PartiallyDownloadedBlock& partialBlock = *it->second.second->partialBlock;
             ReadStatus status = partialBlock.FillBlock(*pblock, resp.txn);
             if (status == READ_STATUS_INVALID) {
-                MarkBlockAsNotInFlight(resp.blockhash, pfrom->GetId()); // Reset in-flight state in case of whitelist
+                MarkBlockAsNotInFlight(resp.blockhash, nodestate); // Reset in-flight state in case of whitelist
                 Misbehaving(pfrom->GetId(), 100);
                 LogPrintf("Peer %d sent us invalid compact block/non-matching block transactions\n", pfrom->GetId());
                 return true;
@@ -2299,7 +2302,7 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
                 // though the block was successfully read, and rely on the
                 // handling in ProcessNewBlock to ensure the block index is
                 // updated, reject messages go out, etc.
-                MarkBlockAsNotInFlight(resp.blockhash, pfrom->GetId()); // it is now an empty pointer
+                MarkBlockAsNotInFlight(resp.blockhash, nodestate); // it is now an empty pointer
                 fBlockRead = true;
                 // mapBlockSource is only used for sending reject messages and DoS scores,
                 // so the race between here and cs_main in ProcessNewBlock is fine.
@@ -2449,7 +2452,7 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
                     }
                     uint32_t nFetchFlags = GetFetchFlags(pfrom);
                     vGetData.push_back(CInv(MSG_BLOCK | nFetchFlags, pindex->GetBlockHash()));
-                    MarkBlockAsInFlight(pfrom->GetId(), pindex->GetBlockHash(), pindex);
+                    MarkBlockAsInFlight(nodestate, pindex->GetBlockHash(), pindex);
                     LogPrint(BCLog::NET, "Requesting block %s from  peer=%d\n",
                             pindex->GetBlockHash().ToString(), pfrom->GetId());
                 }
@@ -2484,12 +2487,13 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
         const uint256 hash(pblock->GetHash());
         {
             LOCK(cs_main);
+            NodeStateAccessor nodestate = State(pfrom->GetId());
             // Also always process if we requested the block explicitly, as we may
             // need it even though it is not a candidate for a new best tip.
             // TODO: Only process if requested from this peer?
             forceProcessing |= mmapBlocksInFlight.count(hash);
             // Block is no longer in flight from this peer
-            MarkBlockAsNotInFlight(hash, pfrom->GetId());
+            MarkBlockAsNotInFlight(hash, nodestate);
             // mapBlockSource is only used for sending reject messages and DoS scores,
             // so the race between here and cs_main in ProcessNewBlock is fine.
             mapBlockSource.emplace(hash, std::make_pair(pfrom->GetId(), true));
@@ -3341,7 +3345,7 @@ bool SendMessages(CNode* pto, CConnman& connman, const std::atomic<bool>& interr
             for (const CBlockIndex *pindex : vToDownload) {
                 uint32_t nFetchFlags = GetFetchFlags(pto);
                 vGetData.push_back(CInv(MSG_BLOCK | nFetchFlags, pindex->GetBlockHash()));
-                MarkBlockAsInFlight(pto->GetId(), pindex->GetBlockHash(), pindex);
+                MarkBlockAsInFlight(state, pindex->GetBlockHash(), pindex);
                 LogPrint(BCLog::NET, "Requesting block %s (%d) peer=%d\n", pindex->GetBlockHash().ToString(),
                     pindex->nHeight, pto->GetId());
             }
