@@ -295,6 +295,7 @@ public:
     }
 } g_nodeStateStorage;
 
+// May NOT be called with cs_main held!
 static NodeStateAccessor State(NodeId pnode) {
     return g_nodeStateStorage.GetNodeState(pnode);
 }
@@ -373,6 +374,8 @@ static void MarkBlockAsNotInFlight(const uint256& hash, NodeStateAccessor& state
     }
 }
 
+// May NOT be called with cs_main held!
+// May only be called with NO NodeStateAccessors held!
 void FinalizeNode(NodeId nodeid, bool& fUpdateConnectionTime) {
     fUpdateConnectionTime = false;
     {
@@ -400,6 +403,8 @@ void FinalizeNode(NodeId nodeid, bool& fUpdateConnectionTime) {
 }
 
 
+// May NOT be called with cs_main held!
+// May only be called with NO NodeStateAccessors held!
 // Returns a bool indicating whether we requested this block.
 bool MarkBlockAsReceived(const uint256& hash) {
     std::vector<std::pair<NodeId, std::list<QueuedBlock>::iterator>> queued_blocks_to_remove;
@@ -486,6 +491,8 @@ void UpdateBlockAvailability(NodeStateAccessor& state, const uint256 &hash) {
     }
 }
 
+// May NOT be called with cs_main held!
+// May only be called with NO NodeStateAccessors held!
 void MaybeSetPeerAsAnnouncingHeaderAndIDs(NodeId nodeid, CConnman& connman) {
     NodeStateAccessor nodestate = State(nodeid);
     if (!nodestate || !nodestate->fSupportsDesiredCmpctVersion) {
@@ -625,6 +632,8 @@ void FindNextBlocksToDownload(NodeStateAccessor& state, unsigned int count, std:
 
 } // namespace
 
+// May NOT be called with cs_main held!
+// May only be called with NO NodeStateAccessors held!
 bool GetNodeStateStats(NodeId nodeid, CNodeStateStats &stats) {
     NodeStateAccessor state = State(nodeid);
     if (!state)
