@@ -224,13 +224,13 @@ struct CNodeState {
     }
 };
 
-/** Provides locked access to a CNodeState  */
+/** Provides locked access to a CNodeState */
 class NodeStateAccessor {
 private:
-    CNodeState  *m_pstate;
+    std::shared_ptr<CNodeState> m_pstate;
 
     NodeStateAccessor() : m_pstate(nullptr) { }
-    NodeStateAccessor(CNodeState  *pstateIn) : m_pstate(pstateIn) { }
+    NodeStateAccessor(std::shared_ptr<CNodeState> pstateIn) : m_pstate(std::move(pstateIn)) { }
     friend class NodeStateStorage;
 
 public:
@@ -241,32 +241,48 @@ public:
 
     explicit operator bool() const { return (bool)m_pstate; }
 
-    CNodeState  * operator->() { return &(*m_pstate); }
-    const CNodeState  * operator->() const { return &(*m_pstate); }
+    CNodeState* operator->() { return &(*m_pstate); }
+    const CNodeState* operator->() const { return &(*m_pstate); }
 };
 
 class NodeStateStorage {
     /** Map maintaining per-node state. Requires cs_main. */
-    std::map<NodeId, CNodeState> m_mapNodeState;
+    std::map<NodeId, std::shared_ptr<CNodeState>> m_mapNodeState;
+    CCriticalSection m_cs;
 
 public:
     NodeStateAccessor GetNodeState(NodeId nodeid) {
-        AssertLockHeld(cs_main);
-        std::map<NodeId, CNodeState>::iterator it = m_mapNodeState.find(nodeid);
-        if (it == m_mapNodeState.end())
-            return NULL;
-        return &it->second;
+        AssertLockHeld(cs_main); // TODO: Remove State reliance on cs_main
+
+        std::shared_ptr<CNodeState> pstate;
+        {
+            LOCK(m_cs);
+            auto it = m_mapNodeState.find(nodeid);
+            if (it == m_mapNodeState.end())
+                return NodeStateAccessor();
+            pstate = it->second;
+        }
+        return NodeStateAccessor(std::move(pstate));
     }
 
     void AddStateForNode(NodeId nodeid, const CAddress& addr, std::string addrName) {
-        LOCK(cs_main);
-        m_mapNodeState.emplace_hint(m_mapNodeState.end(), std::piecewise_construct, std::forward_as_tuple(nodeid), std::forward_as_tuple(addr, std::move(addrName)));
+        LOCK(cs_main); // TODO: Remove State reliance on cs_main
+        LOCK(m_cs);
+        m_mapNodeState.emplace_hint(m_mapNodeState.end(), nodeid, std::make_shared<CNodeState>(addr, std::move(addrName)));
     }
 
     void RemoveStateForNode(NodeId nodeid) {
-        LOCK(cs_main);
+        LOCK(cs_main); // TODO: Remove State reliance on cs_main
+        LOCK(m_cs);
 
-        m_mapNodeState.erase(nodeid);
+        auto it = m_mapNodeState.find(nodeid);
+        if (it == m_mapNodeState.end())
+            return;
+
+        // At this point the only shared_ptr holder should be us
+        // (enforced by cs_main).
+        assert(it->second.use_count() == 1);
+        m_mapNodeState.erase(it);
 
         if (m_mapNodeState.empty()) {
             // Do a consistency check after the last peer is removed.
@@ -359,22 +375,24 @@ static void MarkBlockAsNotInFlight(const uint256& hash, NodeId nodeid, bool clea
 void FinalizeNode(NodeId nodeid, bool& fUpdateConnectionTime) {
     fUpdateConnectionTime = false;
     LOCK(cs_main);
-    NodeStateAccessor state = State(nodeid);
+    {
+        NodeStateAccessor state = State(nodeid);
 
-    if (state->fSyncStarted)
-        nSyncStarted--;
+        if (state->fSyncStarted)
+            nSyncStarted--;
 
-    if (state->nMisbehavior == 0 && state->fCurrentlyConnected) {
-        fUpdateConnectionTime = true;
+        if (state->nMisbehavior == 0 && state->fCurrentlyConnected) {
+            fUpdateConnectionTime = true;
+        }
+
+        for (const QueuedBlock& entry : state->vBlocksInFlight) {
+            MarkBlockAsNotInFlight(entry.hash, nodeid, false);
+        }
+        EraseOrphansFor(nodeid);
+        nPreferredDownload -= state->fPreferredDownload;
+        nPeersWithValidatedDownloads -= (state->nBlocksInFlightValidHeaders != 0);
+        assert(nPeersWithValidatedDownloads >= 0);
     }
-
-    for (const QueuedBlock& entry : state->vBlocksInFlight) {
-        MarkBlockAsNotInFlight(entry.hash, nodeid, false);
-    }
-    EraseOrphansFor(nodeid);
-    nPreferredDownload -= state->fPreferredDownload;
-    nPeersWithValidatedDownloads -= (state->nBlocksInFlightValidHeaders != 0);
-    assert(nPeersWithValidatedDownloads >= 0);
 
     g_nodeStateStorage.RemoveStateForNode(nodeid);
     LogPrint(BCLog::NET, "Cleared nodestate for peer=%d\n", nodeid);
