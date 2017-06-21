@@ -474,7 +474,7 @@ void UpdateBlockAvailability(NodeStateAccessor& state, const uint256 &hash) {
 }
 
 void MaybeSetPeerAsAnnouncingHeaderAndIDs(NodeId nodeid, CConnman& connman) {
-    AssertLockHeld(cs_main);
+    LOCK(cs_main);
     NodeStateAccessor nodestate = State(nodeid);
     if (!nodestate || !nodestate->fSupportsDesiredCmpctVersion) {
         // Never ask from peers who can't provide witnesses.
@@ -910,20 +910,27 @@ void PeerLogicValidation::UpdatedBlockTip(const CBlockIndex *pindexNew, const CB
 }
 
 void PeerLogicValidation::BlockChecked(const CBlock& block, const CValidationState& state) {
+    NodeId node = -1;
+    bool set_fast_relay = false;
+    CBlockReject reject;
+    int nDoS = 0;
+    const uint256 hash(block.GetHash());
+
+    {
     LOCK(cs_main);
 
-    const uint256 hash(block.GetHash());
     std::map<uint256, std::pair<NodeId, bool>>::iterator it = mapBlockSource.find(hash);
+    if (it != mapBlockSource.end()) {
+        node = it->second.first;
+    }
 
-    int nDoS = 0;
     if (state.IsInvalid(nDoS) && it != mapBlockSource.end()) {
-        NodeStateAccessor nodestate = State(it->second.first);
         // Don't send reject message with code 0 or an internal reject code.
-        if (nodestate && state.GetRejectCode() > 0 && state.GetRejectCode() < REJECT_INTERNAL) {
-            CBlockReject reject = {(unsigned char)state.GetRejectCode(), state.GetRejectReason().substr(0, MAX_REJECT_MESSAGE_LENGTH), hash};
-            nodestate->rejects.push_back(reject);
-            if (nDoS > 0 && it->second.second)
-                Misbehaving(nodestate, nDoS);
+        if (state.GetRejectCode() > 0 && state.GetRejectCode() < REJECT_INTERNAL) {
+            reject = {(unsigned char)state.GetRejectCode(), state.GetRejectReason().substr(0, MAX_REJECT_MESSAGE_LENGTH), hash};
+            if (!it->second.second) {
+                nDoS = 0;
+            }
         }
     }
     // Check that:
@@ -936,11 +943,26 @@ void PeerLogicValidation::BlockChecked(const CBlock& block, const CValidationSta
              !IsInitialBlockDownload() &&
              mmapBlocksInFlight.count(hash) == mmapBlocksInFlight.size()) {
         if (it != mapBlockSource.end()) {
-            MaybeSetPeerAsAnnouncingHeaderAndIDs(it->second.first, *connman);
+            set_fast_relay = true;
         }
     }
-    if (it != mapBlockSource.end())
+    if (it != mapBlockSource.end()) {
         mapBlockSource.erase(it);
+    }
+    } // cs_main
+
+    if (reject.hashBlock == hash) {
+        LOCK(cs_main);
+        NodeStateAccessor nodestate = State(node);
+        if (nodestate) {
+            nodestate->rejects.push_back(reject);
+            if (nDoS > 0) {
+                Misbehaving(nodestate, nDoS);
+            }
+        }
+    } else if (set_fast_relay) {
+        MaybeSetPeerAsAnnouncingHeaderAndIDs(node, *connman);
+    }
 }
 
 //////////////////////////////////////////////////////////////////////////////
