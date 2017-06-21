@@ -143,6 +143,8 @@ struct CBlockReject {
  * and we're no longer holding the node's locks.
  */
 struct CNodeState {
+    //! Lock protecting this object
+    CCriticalSection m_cs;
     //! The NodeId which is assocated with this state
     const NodeId m_id;
 
@@ -232,10 +234,12 @@ private:
     std::shared_ptr<CNodeState> m_pstate;
 
     NodeStateAccessor() : m_pstate(nullptr) { }
-    NodeStateAccessor(std::shared_ptr<CNodeState> pstateIn) : m_pstate(std::move(pstateIn)) { }
+    NodeStateAccessor(std::shared_ptr<CNodeState> pstateIn) : m_pstate(std::move(pstateIn)) { ENTER_CRITICAL_SECTION(m_pstate->m_cs); }
     friend class NodeStateStorage;
 
 public:
+    ~NodeStateAccessor() { if (m_pstate) LEAVE_CRITICAL_SECTION(m_pstate->m_cs); }
+
     NodeStateAccessor(const NodeStateAccessor&) =delete;
     NodeStateAccessor& operator= (const NodeStateAccessor&) =delete;
 
