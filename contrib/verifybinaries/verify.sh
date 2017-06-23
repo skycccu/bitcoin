@@ -23,8 +23,7 @@ TMPFILE="hashes.tmp"
 
 SIGNATUREFILENAME="SHA256SUMS.asc"
 RCSUBDIR="test"
-HOST1="https://bitcoincore.org"
-HOST2="https://bitcoin.org"
+HOSTS=("https://bitcoincore.org" "https://bitcoin.org")
 BASEDIR="/bin/"
 VERSIONPREFIX="bitcoin-core-"
 RCVERSIONSTRING="rc"
@@ -83,33 +82,41 @@ else
    exit 2
 fi
 
-#first we fetch the file containing the signature
-WGETOUT=$(wget -N "$HOST1$BASEDIR$SIGNATUREFILENAME" 2>&1)
+ONE_HOST_GOOD=0
+for HOST in "${HOSTS[@]}"; do
+   #first we fetch the file containing the signature
+   WGETOUT=$(wget -N "$HOST$BASEDIR$SIGNATUREFILENAME" 2>&1)
 
-#and then see if wget completed successfully
-if [ $? -ne 0 ]; then
-   echo "Error: couldn't fetch signature file. Have you specified the version number in the following format?"
-   echo "[$VERSIONPREFIX]<version>-[$RCVERSIONSTRING[0-9]] (example: "$VERSIONPREFIX"0.10.4-"$RCVERSIONSTRING"1)"
-   echo "wget output:"
-   echo "$WGETOUT"|sed 's/^/\t/g'
-   exit 2
-fi
+   if [ $? -ne 0 ]; then
+      if [ $ONE_HOST_GOOD = 0 ]; then
+         echo "Error: couldn't fetch signature file. Have you specified the version number in the following format?"
+         echo "[$VERSIONPREFIX]<version>-[$RCVERSIONSTRING[0-9]] (example: "$VERSIONPREFIX"0.10.4-"$RCVERSIONSTRING"1)"
+         echo "wget output:"
+         echo "$WGETOUT"|sed 's/^/\t/g'
+         exit 2
+      else
+         echo "$HOST failed to provide signature file, but other mirror(s) did?"
+         echo "wget output:"
+         echo "$WGETOUT"|sed 's/^/\t/g'
+         clean_up $SIGNATUREFILENAME $SIGNATUREFILENAME.2
+         exit 3
+      fi
+   fi
 
-WGETOUT=$(wget -N -O "$SIGNATUREFILENAME.2" "$HOST2$BASEDIR$SIGNATUREFILENAME" 2>&1)
-if [ $? -ne 0 ]; then
-   echo "bitcoin.org failed to provide signature file, but bitcoincore.org did?"
-   echo "wget output:"
-   echo "$WGETOUT"|sed 's/^/\t/g'
-   clean_up $SIGNATUREFILENAME
-   exit 3
-fi
+   if [ $ONE_HOST_GOOD = 1 ]; then
+      SIGFILEDIFFS="$(diff $SIGNATUREFILENAME $SIGNATUREFILENAME.2)"
+      if [ "$SIGFILEDIFFS" != "" ]; then
+         echo "Signature files were not the same between different mirrors?"
+         clean_up $SIGNATUREFILENAME $SIGNATUREFILENAME.2
+         exit 4
+      fi
+   fi
 
-SIGFILEDIFFS="$(diff $SIGNATUREFILENAME $SIGNATUREFILENAME.2)"
-if [ "$SIGFILEDIFFS" != "" ]; then
-   echo "bitcoin.org and bitcoincore.org signature files were not equal?"
-   clean_up $SIGNATUREFILENAME $SIGNATUREFILENAME.2
-   exit 4
-fi
+   ONE_HOST_GOOD=1
+   mv $SIGNATUREFILENAME $SIGNATUREFILENAME.2
+done
+
+mv $SIGNATUREFILENAME.2 $SIGNATUREFILENAME
 
 #then we check it
 GPGOUT=$(gpg --yes --decrypt --output "$TMPFILE" "$SIGNATUREFILENAME" 2>&1)
@@ -130,7 +137,7 @@ if [ $RET -ne 0 ]; then
 
    echo "gpg output:"
    echo "$GPGOUT"|sed 's/^/\t/g'
-   clean_up $SIGNATUREFILENAME $SIGNATUREFILENAME.2 $TMPFILE
+   clean_up $SIGNATUREFILENAME $TMPFILE
    exit "$RET"
 fi
 
@@ -150,7 +157,7 @@ FILES=$(awk '{print $2}' "$TMPFILE")
 for file in $FILES
 do
    echo "Downloading $file"
-   wget --quiet -N "$HOST1$BASEDIR$file"
+   wget --quiet -N "${HOSTS[0]}$BASEDIR$file"
 done
 
 #check hashes
@@ -168,7 +175,7 @@ fi
 
 if [ -n "$2" ]; then
    echo "Clean up the binaries"
-   clean_up $FILES $SIGNATUREFILENAME $SIGNATUREFILENAME.2 $TMPFILE
+   clean_up $FILES $SIGNATUREFILENAME $TMPFILE
 else
    echo "Keep the binaries in $WORKINGDIR"
    clean_up $TMPFILE
