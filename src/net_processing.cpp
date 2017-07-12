@@ -2001,6 +2001,10 @@ bool static ProcessMessage(CNode* pfrom, NodeStateAccessor& nodestate, const std
 
             for (uint256 hash : vEraseQueue)
                 EraseOrphanTx(hash);
+
+            // ATMP generates callbacks,
+            // so this node will have to wait for further message processing
+            nodestate->m_awaiting_callback_completion = true;
         }
         else if (fMissingInputs)
         {
@@ -2099,6 +2103,10 @@ bool static ProcessMessage(CNode* pfrom, NodeStateAccessor& nodestate, const std
             return true;
         }
         }
+
+        // ProcessNewBlockHeader (could) generate callbacks, even if it fails,
+        // so this node will have to wait for further message processing
+        nodestate->m_awaiting_callback_completion = true;
 
         const CBlockIndex *pindex = NULL;
         CValidationState state;
@@ -2271,6 +2279,11 @@ bool static ProcessMessage(CNode* pfrom, NodeStateAccessor& nodestate, const std
             ProcessNewBlock(chainparams, pblock, true, &fNewBlock);
             if (fNewBlock)
                 pfrom->nLastBlockTime = GetTime();
+
+            // ProcessNewBlock generates callbacks,
+            // so this node will have to wait for further message processing
+            // (duplicative with the one further up from ProcessNewBlockHeaders)
+            nodestate->m_awaiting_callback_completion = true;
         }
     }
 
@@ -2348,6 +2361,10 @@ bool static ProcessMessage(CNode* pfrom, NodeStateAccessor& nodestate, const std
             ProcessNewBlock(chainparams, pblock, true, &fNewBlock);
             if (fNewBlock)
                 pfrom->nLastBlockTime = GetTime();
+
+            // ProcessNewBlock generates callbacks,
+            // so this node will have to wait for further message processing
+            nodestate->m_awaiting_callback_completion = true;
         }
     }
 
@@ -2413,6 +2430,10 @@ bool static ProcessMessage(CNode* pfrom, NodeStateAccessor& nodestate, const std
             hashLastBlock = header.GetHash();
         }
         }
+
+        // ProcessNewBlockHeader (could) generate callbacks, even if it fails,
+        // so this node will have to wait for further message processing
+        nodestate->m_awaiting_callback_completion = true;
 
         CValidationState state;
         if (!ProcessNewBlockHeaders(headers, state, chainparams, &pindexLast)) {
@@ -2526,6 +2547,10 @@ bool static ProcessMessage(CNode* pfrom, NodeStateAccessor& nodestate, const std
         ProcessNewBlock(chainparams, pblock, forceProcessing, &fNewBlock);
         if (fNewBlock)
             pfrom->nLastBlockTime = GetTime();
+
+        // ProcessNewBlock generates callbacks,
+        // so this node will have to wait for further message processing
+        nodestate->m_awaiting_callback_completion = true;
     }
 
 
@@ -2900,9 +2925,6 @@ bool ProcessMessages(CNode* pfrom, CConnman& connman, const std::atomic<bool>& i
         Misbehaving(nodestate, entry.second);
     }
     NodeStateAccessor nodestate = State(pfrom->GetId());
-
-    //TODO: We should set m_awaiting_callback_completion in ProcessMessage only when needed
-    nodestate->m_awaiting_callback_completion = true;
 
     if (nodestate->m_awaiting_callback_completion) {
         pfrom->AddRef();
