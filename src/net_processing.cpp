@@ -1703,8 +1703,6 @@ bool static ProcessMessage(CNode* pfrom, NodeStateAccessor& nodestate, const std
         if (pfrom->fWhitelisted && GetBoolArg("-whitelistrelay", DEFAULT_WHITELISTRELAY))
             fBlocksOnly = false;
 
-        LOCK(cs_main);
-
         uint32_t nFetchFlags = GetFetchFlags(nodestate, pfrom);
 
         for (CInv &inv : vInv)
@@ -1712,14 +1710,16 @@ bool static ProcessMessage(CNode* pfrom, NodeStateAccessor& nodestate, const std
             if (interruptMsgProc)
                 return true;
 
-            bool fAlreadyHave = AlreadyHave(inv);
-            LogPrint(BCLog::NET, "got inv: %s  %s peer=%d\n", inv.ToString(), fAlreadyHave ? "have" : "new", pfrom->GetId());
-
             if (inv.type == MSG_TX) {
                 inv.type |= nFetchFlags;
             }
 
+            bool fAlreadyHave;
+
             if (inv.type == MSG_BLOCK) {
+                LOCK(cs_main);
+                fAlreadyHave = AlreadyHaveBlock(inv.hash);
+
                 UpdateBlockAvailability(nodestate, inv.hash);
                 if (!fAlreadyHave && !fImporting && !fReindex && !mmapBlocksInFlight.count(inv.hash)) {
                     // We used to request the full block here, but since headers-announcements are now the
@@ -1733,13 +1733,17 @@ bool static ProcessMessage(CNode* pfrom, NodeStateAccessor& nodestate, const std
             }
             else
             {
+                fAlreadyHave = AlreadyHaveTx(inv.hash);
                 pfrom->AddInventoryKnown(inv);
                 if (fBlocksOnly) {
                     LogPrint(BCLog::NET, "transaction (%s) inv sent in violation of protocol peer=%d\n", inv.hash.ToString(), pfrom->GetId());
                 } else if (!fAlreadyHave && !fImporting && !fReindex && !IsInitialBlockDownload()) {
+                    LOCK(cs_main);
                     pfrom->AskFor(inv);
                 }
             }
+
+            LogPrint(BCLog::NET, "got inv: %s  %s peer=%d\n", inv.ToString(), fAlreadyHave ? "have" : "new", pfrom->GetId());
 
             // Track requests for our stuff
             GetMainSignals().Inventory(inv.hash);
