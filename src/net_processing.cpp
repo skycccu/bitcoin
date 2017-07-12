@@ -1015,6 +1015,32 @@ void PeerLogicValidation::BlockChecked(const std::shared_ptr<const CBlock>& pblo
 // Messages
 //
 
+bool static AlreadyHaveTx(const uint256& hash) EXCLUSIVE_LOCKS_REQUIRED(cs_main)
+{
+    AssertLockHeld(cs_main);
+    assert(recentRejects);
+    if (chainActive.Tip()->GetBlockHash() != hashRecentRejectsChainTip)
+    {
+        // If the chain tip has changed previously rejected transactions
+        // might be now valid, e.g. due to a nLockTime'd tx becoming valid,
+        // or a double-spend. Reset the rejects filter and give those
+        // txs a second chance.
+        hashRecentRejectsChainTip = chainActive.Tip()->GetBlockHash();
+        recentRejects->reset();
+    }
+
+    return recentRejects->contains(hash) ||
+           mempool.exists(hash) ||
+           mapOrphanTransactions.count(hash) ||
+           pcoinsTip->HaveCoinInCache(COutPoint(hash, 0)) || // Best effort: only try output 0 and 1
+           pcoinsTip->HaveCoinInCache(COutPoint(hash, 1));
+}
+
+bool static AlreadyHaveBlock(const uint256& hash) EXCLUSIVE_LOCKS_REQUIRED(cs_main)
+{
+    AssertLockHeld(cs_main);
+    return mapBlockIndex.count(hash);
+}
 
 bool static AlreadyHave(const CInv& inv) EXCLUSIVE_LOCKS_REQUIRED(cs_main)
 {
@@ -1022,27 +1048,10 @@ bool static AlreadyHave(const CInv& inv) EXCLUSIVE_LOCKS_REQUIRED(cs_main)
     {
     case MSG_TX:
     case MSG_WITNESS_TX:
-        {
-            assert(recentRejects);
-            if (chainActive.Tip()->GetBlockHash() != hashRecentRejectsChainTip)
-            {
-                // If the chain tip has changed previously rejected transactions
-                // might be now valid, e.g. due to a nLockTime'd tx becoming valid,
-                // or a double-spend. Reset the rejects filter and give those
-                // txs a second chance.
-                hashRecentRejectsChainTip = chainActive.Tip()->GetBlockHash();
-                recentRejects->reset();
-            }
-
-            return recentRejects->contains(inv.hash) ||
-                   mempool.exists(inv.hash) ||
-                   mapOrphanTransactions.count(inv.hash) ||
-                   pcoinsTip->HaveCoinInCache(COutPoint(inv.hash, 0)) || // Best effort: only try output 0 and 1
-                   pcoinsTip->HaveCoinInCache(COutPoint(inv.hash, 1));
-        }
+        return AlreadyHaveTx(inv.hash);
     case MSG_BLOCK:
     case MSG_WITNESS_BLOCK:
-        return mapBlockIndex.count(inv.hash);
+        return AlreadyHaveBlock(inv.hash);
     }
     // Don't know what it is, just say we already got one
     return true;
@@ -1926,7 +1935,7 @@ bool static ProcessMessage(CNode* pfrom, NodeStateAccessor& nodestate, const std
 
         std::list<CTransactionRef> lRemovedTxn;
 
-        if (!AlreadyHave(inv) && AcceptToMemoryPool(mempool, state, ptx, true, &fMissingInputs, &lRemovedTxn)) {
+        if (!AlreadyHaveTx(inv.hash) && AcceptToMemoryPool(mempool, state, ptx, true, &fMissingInputs, &lRemovedTxn)) {
             mempool.check(pcoinsTip);
             RelayTransaction(tx, connman);
             for (unsigned int i = 0; i < tx.vout.size(); i++) {
