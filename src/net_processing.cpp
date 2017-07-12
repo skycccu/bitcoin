@@ -99,6 +99,19 @@ namespace {
      */
     std::unique_ptr<CRollingBloomFilter> recentRejects GUARDED_BY(cs_recentRejects);
 
+    /**
+     * Keep track of transaction which were recently in a block and don't
+     * request those again.
+     *
+     * Note that we dont actually ever clear this - in cases of reorgs where
+     * transactions dropped out they were either added back to our mempool
+     * or fell out due to size limitations (in which case we'll get them again
+     * if the user really cares and re-sends).
+     *
+     * Protected by cs_recentRejects.
+     */
+    std::unique_ptr<CRollingBloomFilter> txn_recently_in_block GUARDED_BY(cs_recentRejects);
+
     /** Blocks that are in flight, and that are in the queue to be downloaded. Protected by cs_main. */
     struct QueuedBlock {
         uint256 hash;
@@ -838,9 +851,17 @@ PeerLogicValidation::PeerLogicValidation(CConnman* connmanIn) : connman(connmanI
     // Initialize global variables that cannot be constructed at startup.
     LOCK(cs_recentRejects);
     recentRejects.reset(new CRollingBloomFilter(120000, 0.000001));
+    txn_recently_in_block.reset(new CRollingBloomFilter(16000 /* just a few block's worth */, 0.000001));
 }
 
 void PeerLogicValidation::BlockConnected(const std::shared_ptr<const CBlock>& pblock, const CBlockIndex* pindex, const std::vector<CTransactionRef>& vtxConflicted) {
+    {
+        LOCK(cs_recentRejects);
+        for (const CTransactionRef& ptx : pblock->vtx) {
+            txn_recently_in_block->insert(ptx->GetHash());
+        }
+    }
+
     LOCK(cs_orphan_transactions);
 
     std::vector<uint256> vOrphanErase;
@@ -1029,14 +1050,13 @@ void PeerLogicValidation::BlockChecked(const std::shared_ptr<const CBlock>& pblo
 // Messages
 //
 
-bool static AlreadyHaveTx(const uint256& hash) EXCLUSIVE_LOCKS_REQUIRED(cs_main)
+bool static AlreadyHaveTx(const uint256& hash)
 {
-    AssertLockHeld(cs_main);
-
     {
         LOCK(cs_recentRejects);
         assert(recentRejects);
         if (recentRejects->contains(hash)) return true;
+        if (txn_recently_in_block->contains(hash)) return true;
     }
 
     {
@@ -1044,9 +1064,7 @@ bool static AlreadyHaveTx(const uint256& hash) EXCLUSIVE_LOCKS_REQUIRED(cs_main)
         if (mapOrphanTransactions.count(hash)) return true;
     }
 
-    return mempool.exists(hash) ||
-           pcoinsTip->HaveCoinInCache(COutPoint(hash, 0)) || // Best effort: only try output 0 and 1
-           pcoinsTip->HaveCoinInCache(COutPoint(hash, 1));
+    return mempool.exists(hash);
 }
 
 bool static AlreadyHaveBlock(const uint256& hash) EXCLUSIVE_LOCKS_REQUIRED(cs_main)
