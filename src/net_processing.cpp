@@ -75,11 +75,12 @@ namespace {
      */
     std::map<uint256, std::pair<NodeId, bool>> mapBlockSource;
 
+    CCriticalSection cs_recentRejects;
     /**
      * Filter for transactions that were recently rejected by
      * AcceptToMemoryPool. These are not rerequested until the chain tip
      * changes, at which point the entire filter is reset. Protected by
-     * cs_main.
+     * cs_recentRejects.
      *
      * Without this filter we'd be re-requesting txs from each of our peers,
      * increasing bandwidth consumption considerably. For instance, with 100
@@ -95,8 +96,7 @@ namespace {
      *
      * Memory used: 1.3 MB
      */
-    std::unique_ptr<CRollingBloomFilter> recentRejects;
-    uint256 hashRecentRejectsChainTip;
+    std::unique_ptr<CRollingBloomFilter> recentRejects GUARDED_BY(cs_recentRejects);
 
     /** Blocks that are in flight, and that are in the queue to be downloaded. Protected by cs_main. */
     struct QueuedBlock {
@@ -832,6 +832,7 @@ static void Misbehaving(NodeStateAccessor& state, int howmuch)
 
 PeerLogicValidation::PeerLogicValidation(CConnman* connmanIn) : connman(connmanIn) {
     // Initialize global variables that cannot be constructed at startup.
+    LOCK(cs_recentRejects);
     recentRejects.reset(new CRollingBloomFilter(120000, 0.000001));
 }
 
@@ -928,6 +929,15 @@ void PeerLogicValidation::UpdatedBlockTip(const CBlockIndex *pindexNew, const CB
     const int nNewHeight = pindexNew->nHeight;
     connman->SetBestHeight(nNewHeight);
 
+    {
+        LOCK(cs_recentRejects);
+        // When the chain tip changes previously rejected transactions
+        // might be now valid, e.g. due to a nLockTime'd tx becoming valid,
+        // or a double-spend. Reset the rejects filter and give those
+        // txs a second chance.
+        recentRejects->reset();
+    }
+
     if (!fInitialDownload) {
         // Find the hashes of all blocks that weren't previously in the best chain.
         std::vector<uint256> vHashes;
@@ -1018,19 +1028,14 @@ void PeerLogicValidation::BlockChecked(const std::shared_ptr<const CBlock>& pblo
 bool static AlreadyHaveTx(const uint256& hash) EXCLUSIVE_LOCKS_REQUIRED(cs_main)
 {
     AssertLockHeld(cs_main);
-    assert(recentRejects);
-    if (chainActive.Tip()->GetBlockHash() != hashRecentRejectsChainTip)
+
     {
-        // If the chain tip has changed previously rejected transactions
-        // might be now valid, e.g. due to a nLockTime'd tx becoming valid,
-        // or a double-spend. Reset the rejects filter and give those
-        // txs a second chance.
-        hashRecentRejectsChainTip = chainActive.Tip()->GetBlockHash();
-        recentRejects->reset();
+        LOCK(cs_recentRejects);
+        assert(recentRejects);
+        if (recentRejects->contains(hash)) return true;
     }
 
-    return recentRejects->contains(hash) ||
-           mempool.exists(hash) ||
+    return mempool.exists(hash) ||
            mapOrphanTransactions.count(hash) ||
            pcoinsTip->HaveCoinInCache(COutPoint(hash, 0)) || // Best effort: only try output 0 and 1
            pcoinsTip->HaveCoinInCache(COutPoint(hash, 1));
@@ -2000,6 +2005,7 @@ bool static ProcessMessage(CNode* pfrom, NodeStateAccessor& nodestate, const std
                             // Do not use rejection cache for witness transactions or
                             // witness-stripped transactions, as they can have been malleated.
                             // See https://github.com/bitcoin/bitcoin/issues/8279 for details.
+                            LOCK(cs_recentRejects);
                             assert(recentRejects);
                             recentRejects->insert(orphanHash);
                         }
@@ -2019,6 +2025,7 @@ bool static ProcessMessage(CNode* pfrom, NodeStateAccessor& nodestate, const std
         {
             bool fRejectedParents = false; // It may be the case that the orphans parents have all been rejected
             for (const CTxIn& txin : tx.vin) {
+                LOCK(cs_recentRejects);
                 if (recentRejects->contains(txin.prevout.hash)) {
                     fRejectedParents = true;
                     break;
@@ -2043,6 +2050,7 @@ bool static ProcessMessage(CNode* pfrom, NodeStateAccessor& nodestate, const std
                 LogPrint(BCLog::MEMPOOL, "not keeping orphan with rejected parents %s\n",tx.GetHash().ToString());
                 // We will continue to reject this tx since it has rejected
                 // parents so avoid re-requesting it from other peers.
+                LOCK(cs_recentRejects);
                 recentRejects->insert(tx.GetHash());
             }
         } else {
@@ -2050,8 +2058,11 @@ bool static ProcessMessage(CNode* pfrom, NodeStateAccessor& nodestate, const std
                 // Do not use rejection cache for witness transactions or
                 // witness-stripped transactions, as they can have been malleated.
                 // See https://github.com/bitcoin/bitcoin/issues/8279 for details.
-                assert(recentRejects);
-                recentRejects->insert(tx.GetHash());
+                {
+                    LOCK(cs_recentRejects);
+                    assert(recentRejects);
+                    recentRejects->insert(tx.GetHash());
+                }
                 if (RecursiveDynamicUsage(*ptx) < 100000) {
                     AddToCompactExtraTransactions(ptx);
                 }
