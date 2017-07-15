@@ -1498,7 +1498,6 @@ void static RespondToBlockTransactions(CNode* pfrom, NodeStateAccessor& nodestat
 
 bool static ProcessMessage(CNode* pfrom, NodeStateAccessor& nodestate, const std::string& strCommand, CDataStream& vRecv, int64_t nTimeReceived, const CChainParams& chainparams, CConnman& connman, const std::atomic<bool>& interruptMsgProc, std::map<NodeId, int>& other_node_ban_map)
 {
-    LogPrint(BCLog::NET, "received: %s (%u bytes) peer=%d\n", SanitizeString(strCommand), vRecv.size(), pfrom->GetId());
     if (IsArgSet("-dropmessagestest") && GetRand(GetArg("-dropmessagestest", 0)) == 0)
     {
         LogPrintf("dropmessagestest DROPPING RECV MESSAGE\n");
@@ -3034,6 +3033,7 @@ unsigned int ProcessMessages(CNode* pfrom, CConnman& connman, const std::atomic<
     try
     {
         NodeStateAccessor state = State(pfrom->GetId());
+        LogPrint(BCLog::NET, "received: %s (%u bytes) peer=%d, second_thread=%d\n", SanitizeString(strCommand), vRecv.size(), pfrom->GetId(), avoid_locking);
         fRet = ProcessMessage(pfrom, state, strCommand, vRecv, msg.nTime, chainparams, connman, interruptMsgProc, other_node_ban_map);
         if (interruptMsgProc)
             return 0;
