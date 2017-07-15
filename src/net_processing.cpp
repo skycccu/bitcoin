@@ -52,12 +52,13 @@ struct COrphanTx {
     NodeId fromPeer;
     int64_t nTimeExpire;
 };
-std::map<uint256, COrphanTx> mapOrphanTransactions GUARDED_BY(cs_main);
-std::map<COutPoint, std::set<std::map<uint256, COrphanTx>::iterator, IteratorComparator>> mapOrphanTransactionsByPrev GUARDED_BY(cs_main);
-void EraseOrphansFor(NodeId peer) EXCLUSIVE_LOCKS_REQUIRED(cs_main);
+CCriticalSection cs_orphan_transactions;
+std::map<uint256, COrphanTx> mapOrphanTransactions GUARDED_BY(cs_orphan_transactions);
+std::map<COutPoint, std::set<std::map<uint256, COrphanTx>::iterator, IteratorComparator>> mapOrphanTransactionsByPrev GUARDED_BY(cs_orphan_transactions);
+void EraseOrphansFor(NodeId peer) EXCLUSIVE_LOCKS_REQUIRED(cs_orphan_transactions);
 
 static size_t vExtraTxnForCompactIt = 0;
-static std::vector<std::pair<uint256, CTransactionRef>> vExtraTxnForCompact GUARDED_BY(cs_main);
+static std::vector<std::pair<uint256, CTransactionRef>> vExtraTxnForCompact GUARDED_BY(cs_orphan_transactions);
 
 static const uint64_t RANDOMIZER_ID_ADDRESS_RELAY = 0x3cac0035b5866b90ULL; // SHA256("main address relay")[0:8]
 
@@ -410,7 +411,10 @@ void FinalizeNode(NodeId nodeid, bool& fUpdateConnectionTime) {
         for (const QueuedBlock& entry : state->vBlocksInFlight) {
             MarkBlockAsNotInFlight(entry.hash, state, false);
         }
-        EraseOrphansFor(nodeid);
+        {
+            LOCK(cs_orphan_transactions);
+            EraseOrphansFor(nodeid);
+        }
         nPreferredDownload -= state->fPreferredDownload;
         nPeersWithValidatedDownloads -= (state->nBlocksInFlightValidHeaders != 0);
         assert(nPeersWithValidatedDownloads >= 0);
@@ -689,7 +693,7 @@ void UnregisterNodeSignals(CNodeSignals& nodeSignals)
 // mapOrphanTransactions
 //
 
-void AddToCompactExtraTransactions(const CTransactionRef& tx)
+void AddToCompactExtraTransactions(const CTransactionRef& tx) EXCLUSIVE_LOCKS_REQUIRED(cs_orphan_transactions)
 {
     size_t max_extra_txn = GetArg("-blockreconstructionextratxn", DEFAULT_BLOCK_RECONSTRUCTION_EXTRA_TXN);
     if (max_extra_txn <= 0)
@@ -700,7 +704,7 @@ void AddToCompactExtraTransactions(const CTransactionRef& tx)
     vExtraTxnForCompactIt = (vExtraTxnForCompactIt + 1) % max_extra_txn;
 }
 
-bool AddOrphanTx(const CTransactionRef& tx, NodeId peer) EXCLUSIVE_LOCKS_REQUIRED(cs_main)
+bool AddOrphanTx(const CTransactionRef& tx, NodeId peer) EXCLUSIVE_LOCKS_REQUIRED(cs_orphan_transactions)
 {
     const uint256& hash = tx->GetHash();
     if (mapOrphanTransactions.count(hash))
@@ -733,7 +737,7 @@ bool AddOrphanTx(const CTransactionRef& tx, NodeId peer) EXCLUSIVE_LOCKS_REQUIRE
     return true;
 }
 
-int static EraseOrphanTx(uint256 hash) EXCLUSIVE_LOCKS_REQUIRED(cs_main)
+int static EraseOrphanTx(uint256 hash) EXCLUSIVE_LOCKS_REQUIRED(cs_orphan_transactions)
 {
     std::map<uint256, COrphanTx>::iterator it = mapOrphanTransactions.find(hash);
     if (it == mapOrphanTransactions.end())
@@ -751,7 +755,7 @@ int static EraseOrphanTx(uint256 hash) EXCLUSIVE_LOCKS_REQUIRED(cs_main)
     return 1;
 }
 
-void EraseOrphansFor(NodeId peer)
+void EraseOrphansFor(NodeId peer) EXCLUSIVE_LOCKS_REQUIRED(cs_orphan_transactions)
 {
     int nErased = 0;
     std::map<uint256, COrphanTx>::iterator iter = mapOrphanTransactions.begin();
@@ -767,7 +771,7 @@ void EraseOrphansFor(NodeId peer)
 }
 
 
-unsigned int LimitOrphanTxSize(unsigned int nMaxOrphans) EXCLUSIVE_LOCKS_REQUIRED(cs_main)
+unsigned int LimitOrphanTxSize(unsigned int nMaxOrphans) EXCLUSIVE_LOCKS_REQUIRED(cs_orphan_transactions)
 {
     unsigned int nEvicted = 0;
     static int64_t nNextSweep;
@@ -837,7 +841,7 @@ PeerLogicValidation::PeerLogicValidation(CConnman* connmanIn) : connman(connmanI
 }
 
 void PeerLogicValidation::BlockConnected(const std::shared_ptr<const CBlock>& pblock, const CBlockIndex* pindex, const std::vector<CTransactionRef>& vtxConflicted) {
-    LOCK(cs_main);
+    LOCK(cs_orphan_transactions);
 
     std::vector<uint256> vOrphanErase;
 
@@ -1035,8 +1039,12 @@ bool static AlreadyHaveTx(const uint256& hash) EXCLUSIVE_LOCKS_REQUIRED(cs_main)
         if (recentRejects->contains(hash)) return true;
     }
 
+    {
+        LOCK(cs_orphan_transactions);
+        if (mapOrphanTransactions.count(hash)) return true;
+    }
+
     return mempool.exists(hash) ||
-           mapOrphanTransactions.count(hash) ||
            pcoinsTip->HaveCoinInCache(COutPoint(hash, 0)) || // Best effort: only try output 0 and 1
            pcoinsTip->HaveCoinInCache(COutPoint(hash, 1));
 }
@@ -1954,6 +1962,8 @@ bool static ProcessMessage(CNode* pfrom, NodeStateAccessor& nodestate, const std
                 tx.GetHash().ToString(),
                 mempool.size(), mempool.DynamicMemoryUsage() / 1000);
 
+            LOCK(cs_orphan_transactions);
+
             // Recursively process any orphan transactions that depended on this one
             std::set<NodeId> setMisbehaving;
             while (!vWorkQueue.empty()) {
@@ -2038,6 +2048,8 @@ bool static ProcessMessage(CNode* pfrom, NodeStateAccessor& nodestate, const std
                     pfrom->AddInventoryKnown(_inv);
                     if (!AlreadyHave(_inv)) pfrom->AskFor(_inv);
                 }
+
+                LOCK(cs_orphan_transactions);
                 AddOrphanTx(ptx, pfrom->GetId());
 
                 // DoS prevention: do not allow mapOrphanTransactions to grow unbounded
