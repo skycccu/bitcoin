@@ -1134,13 +1134,15 @@ static void RelayAddress(const CAddress& addr, bool fReachable, CConnman& connma
     connman.ForEachNodeThen(std::move(sortfunc), std::move(pushfunc));
 }
 
-void static ProcessGetData(CNode* pfrom, NodeStateAccessor& nodestate, const Consensus::Params& consensusParams, CConnman& connman, const std::atomic<bool>& interruptMsgProc)
+bool static ProcessGetData(CNode* pfrom, NodeStateAccessor& nodestate, const Consensus::Params& consensusParams, CConnman& connman, const std::atomic<bool>& interruptMsgProc, bool avoid_locking=false)
 {
     assert(pfrom->GetId() == nodestate->m_id);
 
     std::deque<CInv>::iterator it = pfrom->vRecvGetData.begin();
     std::vector<CInv> vNotFound;
     const CNetMsgMaker msgMaker(pfrom->GetSendVersion());
+
+    bool need_main_next = false;
 
     while (it != pfrom->vRecvGetData.end()) {
         // Don't bother if send buffer is too full to respond anyway
@@ -1150,12 +1152,15 @@ void static ProcessGetData(CNode* pfrom, NodeStateAccessor& nodestate, const Con
         const CInv &inv = *it;
         {
             if (interruptMsgProc)
-                return;
-
-            it++;
+                return true;
 
             if (inv.type == MSG_BLOCK || inv.type == MSG_FILTERED_BLOCK || inv.type == MSG_CMPCT_BLOCK || inv.type == MSG_WITNESS_BLOCK)
             {
+                TRY_LOCK(cs_main, main_locked);
+                if (!main_locked && avoid_locking) {
+                    need_main_next = true;
+                    break;
+                }
                 LOCK(cs_main);
 
                 bool send = false;
@@ -1314,6 +1319,7 @@ void static ProcessGetData(CNode* pfrom, NodeStateAccessor& nodestate, const Con
             // Track requests for our stuff.
             GetMainSignals().Inventory(inv.hash);
 
+            it++;
             if (inv.type == MSG_BLOCK || inv.type == MSG_FILTERED_BLOCK || inv.type == MSG_CMPCT_BLOCK || inv.type == MSG_WITNESS_BLOCK)
                 break;
         }
@@ -1331,6 +1337,8 @@ void static ProcessGetData(CNode* pfrom, NodeStateAccessor& nodestate, const Con
         // having to download the entire memory pool.
         connman.PushMessage(pfrom, msgMaker.Make(NetMsgType::NOTFOUND, vNotFound));
     }
+
+    return !need_main_next;
 }
 
 uint32_t GetFetchFlags(NodeStateAccessor& state, CNode* pfrom) {
@@ -1771,7 +1779,6 @@ bool static ProcessMessage(CNode* pfrom, NodeStateAccessor& nodestate, const std
         }
 
         pfrom->vRecvGetData.insert(pfrom->vRecvGetData.end(), vInv.begin(), vInv.end());
-        ProcessGetData(pfrom, nodestate, chainparams.GetConsensus(), connman, interruptMsgProc);
     }
 
 
@@ -2849,7 +2856,7 @@ static bool SendRejectsAndCheckIfBanned(CNode* pnode, NodeStateAccessor& state, 
     return false;
 }
 
-unsigned int ProcessMessages(CNode* pfrom, CConnman& connman, const std::atomic<bool>& interruptMsgProc)
+unsigned int ProcessMessages(CNode* pfrom, CConnman& connman, const std::atomic<bool>& interruptMsgProc, bool avoid_locking)
 {
     const CChainParams& chainparams = Params();
     //
@@ -2872,7 +2879,9 @@ unsigned int ProcessMessages(CNode* pfrom, CConnman& connman, const std::atomic<
 
     if (!pfrom->vRecvGetData.empty()) {
         NodeStateAccessor state = State(pfrom->GetId());
-        ProcessGetData(pfrom, state, chainparams.GetConsensus(), connman, interruptMsgProc);
+        if (!ProcessGetData(pfrom, state, chainparams.GetConsensus(), connman, interruptMsgProc, avoid_locking)) {
+            return PROCESS_MESSAGES_MORE_WITH_MAIN;
+        }
     }
 
     if (pfrom->fDisconnect)
@@ -2890,6 +2899,28 @@ unsigned int ProcessMessages(CNode* pfrom, CConnman& connman, const std::atomic<
         LOCK(pfrom->cs_vProcessMsg);
         if (pfrom->vProcessMsg.empty())
             return 0;
+
+        const std::string& strCommand = pfrom->vProcessMsg.front().hdr.GetCommand();
+        if (avoid_locking &&
+                strCommand != NetMsgType::REJECT &&
+                strCommand != NetMsgType::VERSION &&
+                strCommand != NetMsgType::VERACK &&
+                strCommand != NetMsgType::ADDR &&
+                strCommand != NetMsgType::SENDHEADERS &&
+                strCommand != NetMsgType::SENDCMPCT &&
+                strCommand != NetMsgType::GETDATA &&
+                strCommand != NetMsgType::GETADDR &&
+                strCommand != NetMsgType::MEMPOOL &&
+                strCommand != NetMsgType::PING &&
+                strCommand != NetMsgType::PONG &&
+                strCommand != NetMsgType::FILTERLOAD &&
+                strCommand != NetMsgType::FILTERADD &&
+                strCommand != NetMsgType::FILTERCLEAR &&
+                strCommand != NetMsgType::FEEFILTER &&
+                strCommand != NetMsgType::NOTFOUND) {
+            return PROCESS_MESSAGES_MORE_WITH_MAIN;
+        }
+
         // Just take one message
         msgs.splice(msgs.begin(), pfrom->vProcessMsg, pfrom->vProcessMsg.begin());
         pfrom->nProcessQueueSize -= msgs.front().vRecv.size() + CMessageHeader::HEADER_SIZE;
@@ -2996,6 +3027,10 @@ unsigned int ProcessMessages(CNode* pfrom, CConnman& connman, const std::atomic<
         });
     } else {
         SendRejectsAndCheckIfBanned(pfrom, nodestate, connman);
+    }
+
+    if (!ProcessGetData(pfrom, nodestate, chainparams.GetConsensus(), connman, interruptMsgProc, avoid_locking)) {
+        return PROCESS_MESSAGES_MORE_WITH_MAIN;
     }
 
     return fMoreWork ? PROCESS_MESSAGES_MORE_AVAILABLE : 0;
