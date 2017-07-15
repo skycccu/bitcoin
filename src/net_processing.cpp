@@ -126,7 +126,7 @@ namespace {
     std::list<NodeId> lNodesAnnouncingHeaderAndIDs;
 
     /** Number of preferable block download peers. */
-    int nPreferredDownload = 0;
+    std::atomic_int nPreferredDownload(0);
 
     /** Number of peers from which we're downloading blocks. */
     int nPeersWithValidatedDownloads = 0;
@@ -1510,15 +1510,12 @@ bool static ProcessMessage(CNode* pfrom, NodeStateAccessor& nodestate, const std
         }
 
         // Potentially mark this peer as a preferred download peer.
-        {
-        LOCK(cs_main);
         UpdatePreferredDownload(pfrom, nodestate);
-        }
 
         if (!pfrom->fInbound)
         {
             // Advertise our address
-            if (fListen && !IsInitialBlockDownload())
+            if (fListen)
             {
                 CAddress addr = GetLocalAddress(&pfrom->addr, pfrom->GetLocalServices());
                 FastRandomContext insecure_rand;
