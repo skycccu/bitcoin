@@ -223,6 +223,12 @@ struct CNodeState {
     bool fSupportsDesiredCmpctVersion;
 
     /**
+     * INVs the peer requested from us but which we have yet to respond to
+     * (obviously must be filled before other messages are responded to)
+     */
+    std::vector<CInv> m_invs_to_process;
+
+    /**
      * If this node is waiting on validationinterface callbacks to complete before it can make more progress.
      */
     bool m_awaiting_callback_completion;
@@ -1136,6 +1142,8 @@ static void RelayAddress(const CAddress& addr, bool fReachable, CConnman& connma
 
 bool static ProcessGetData(CNode* pfrom, NodeStateAccessor& nodestate, const Consensus::Params& consensusParams, CConnman& connman, const std::atomic<bool>& interruptMsgProc, bool avoid_locking=false)
 {
+    if (pfrom->vRecvGetData.empty()) return true;
+
     assert(pfrom->GetId() == nodestate->m_id);
 
     std::deque<CInv>::iterator it = pfrom->vRecvGetData.begin();
@@ -1349,6 +1357,89 @@ uint32_t GetFetchFlags(NodeStateAccessor& state, CNode* pfrom) {
         nFetchFlags |= MSG_WITNESS_FLAG;
     }
     return nFetchFlags;
+}
+
+bool static ProcessInv(CNode* pfrom, NodeStateAccessor& nodestate, CConnman& connman, const std::atomic<bool>& interruptMsgProc, bool avoid_locking)
+{
+    if (nodestate->m_invs_to_process.empty()) return true;
+
+    bool fBlocksOnly = !fRelayTxes;
+
+    // Allow whitelisted peers to send data other than blocks in blocks only mode if whitelistrelay is true
+    if (pfrom->fWhitelisted && GetBoolArg("-whitelistrelay", DEFAULT_WHITELISTRELAY))
+        fBlocksOnly = false;
+
+    uint32_t nFetchFlags = GetFetchFlags(nodestate, pfrom);
+
+    std::vector<CInv>::iterator it = nodestate->m_invs_to_process.begin();
+    bool need_main_next = false;
+
+    const CNetMsgMaker msgMaker(pfrom->GetSendVersion());
+
+    while (it != nodestate->m_invs_to_process.end())
+    {
+        if (interruptMsgProc)
+            return true;
+
+        CInv& inv = *it;
+
+        if (inv.type == MSG_TX) {
+            inv.type |= nFetchFlags;
+        }
+
+        bool fAlreadyHave;
+
+        if (inv.type == MSG_BLOCK) {
+            TRY_LOCK(cs_main, main_locked);
+            if (!main_locked && avoid_locking) {
+                need_main_next = true;
+                break;
+            }
+            LOCK(cs_main);
+
+            fAlreadyHave = AlreadyHaveBlock(inv.hash);
+
+            UpdateBlockAvailability(nodestate, inv.hash);
+            if (!fAlreadyHave && !fImporting && !fReindex && !mmapBlocksInFlight.count(inv.hash)) {
+                // We used to request the full block here, but since headers-announcements are now the
+                // primary method of announcement on the network, and since, in the case that a node
+                // fell back to inv we probably have a reorg which we should get the headers for first,
+                // we now only provide a getheaders response here. When we receive the headers, we will
+                // then ask for the blocks we need.
+                connman.PushMessage(pfrom, msgMaker.Make(NetMsgType::GETHEADERS, chainActive.GetLocator(pindexBestHeader), inv.hash));
+                LogPrint(BCLog::NET, "getheaders (%d) %s to peer=%d\n", pindexBestHeader->nHeight, inv.hash.ToString(), pfrom->GetId());
+            }
+        }
+        else
+        {
+            fAlreadyHave = AlreadyHaveTx(inv.hash);
+            pfrom->AddInventoryKnown(inv);
+            if (fBlocksOnly) {
+                LogPrint(BCLog::NET, "transaction (%s) inv sent in violation of protocol peer=%d\n", inv.hash.ToString(), pfrom->GetId());
+            } else if (!fAlreadyHave && !fImporting && !fReindex) {
+                TRY_LOCK(cs_main, main_locked);
+                if (!main_locked && avoid_locking) {
+                    need_main_next = true;
+                    break;
+                }
+                if (!IsInitialBlockDownload()) {
+                    LOCK(cs_main);
+                    pfrom->AskFor(inv);
+                }
+            }
+        }
+
+        LogPrint(BCLog::NET, "got inv: %s  %s peer=%d\n", inv.ToString(), fAlreadyHave ? "have" : "new", pfrom->GetId());
+
+        // Track requests for our stuff
+        GetMainSignals().Inventory(inv.hash);
+
+        it++;
+    }
+
+    nodestate->m_invs_to_process.erase(nodestate->m_invs_to_process.begin(), it);
+    nodestate->m_invs_to_process.shrink_to_fit();
+    return !need_main_next;
 }
 
 inline void static SendBlockTransactions(const CBlock& block, const BlockTransactionsRequest& req, NodeStateAccessor& nodestate, CNode* pfrom, CConnman& connman) {
@@ -1700,64 +1791,16 @@ bool static ProcessMessage(CNode* pfrom, NodeStateAccessor& nodestate, const std
 
     else if (strCommand == NetMsgType::INV)
     {
-        std::vector<CInv> vInv;
-        vRecv >> vInv;
-        if (vInv.size() > MAX_INV_SZ)
+        assert(nodestate->m_invs_to_process.empty());
+
+        vRecv >> nodestate->m_invs_to_process;
+        if (nodestate->m_invs_to_process.size() > MAX_INV_SZ)
         {
             Misbehaving(nodestate, 20);
-            return error("message inv size() = %u", vInv.size());
-        }
-
-        bool fBlocksOnly = !fRelayTxes;
-
-        // Allow whitelisted peers to send data other than blocks in blocks only mode if whitelistrelay is true
-        if (pfrom->fWhitelisted && GetBoolArg("-whitelistrelay", DEFAULT_WHITELISTRELAY))
-            fBlocksOnly = false;
-
-        uint32_t nFetchFlags = GetFetchFlags(nodestate, pfrom);
-
-        for (CInv &inv : vInv)
-        {
-            if (interruptMsgProc)
-                return true;
-
-            if (inv.type == MSG_TX) {
-                inv.type |= nFetchFlags;
-            }
-
-            bool fAlreadyHave;
-
-            if (inv.type == MSG_BLOCK) {
-                LOCK(cs_main);
-                fAlreadyHave = AlreadyHaveBlock(inv.hash);
-
-                UpdateBlockAvailability(nodestate, inv.hash);
-                if (!fAlreadyHave && !fImporting && !fReindex && !mmapBlocksInFlight.count(inv.hash)) {
-                    // We used to request the full block here, but since headers-announcements are now the
-                    // primary method of announcement on the network, and since, in the case that a node
-                    // fell back to inv we probably have a reorg which we should get the headers for first,
-                    // we now only provide a getheaders response here. When we receive the headers, we will
-                    // then ask for the blocks we need.
-                    connman.PushMessage(pfrom, msgMaker.Make(NetMsgType::GETHEADERS, chainActive.GetLocator(pindexBestHeader), inv.hash));
-                    LogPrint(BCLog::NET, "getheaders (%d) %s to peer=%d\n", pindexBestHeader->nHeight, inv.hash.ToString(), pfrom->GetId());
-                }
-            }
-            else
-            {
-                fAlreadyHave = AlreadyHaveTx(inv.hash);
-                pfrom->AddInventoryKnown(inv);
-                if (fBlocksOnly) {
-                    LogPrint(BCLog::NET, "transaction (%s) inv sent in violation of protocol peer=%d\n", inv.hash.ToString(), pfrom->GetId());
-                } else if (!fAlreadyHave && !fImporting && !fReindex && !IsInitialBlockDownload()) {
-                    LOCK(cs_main);
-                    pfrom->AskFor(inv);
-                }
-            }
-
-            LogPrint(BCLog::NET, "got inv: %s  %s peer=%d\n", inv.ToString(), fAlreadyHave ? "have" : "new", pfrom->GetId());
-
-            // Track requests for our stuff
-            GetMainSignals().Inventory(inv.hash);
+            size_t size = nodestate->m_invs_to_process.size();
+            nodestate->m_invs_to_process.clear();
+            nodestate->m_invs_to_process.shrink_to_fit();
+            return error("message inv size() = %u", size);
         }
     }
 
@@ -2869,26 +2912,32 @@ unsigned int ProcessMessages(CNode* pfrom, CConnman& connman, const std::atomic<
     //
     bool fMoreWork = false;
 
+    if (pfrom->fDisconnect)
+        return 0;
+
     {
         NodeStateAccessor nodestate = State(pfrom->GetId());
         if (nodestate->m_awaiting_callback_completion) {
             // No more work to do, let the callback WakeMessageHandler()
             return 0;
         }
-    }
 
-    if (!pfrom->vRecvGetData.empty()) {
-        NodeStateAccessor state = State(pfrom->GetId());
-        if (!ProcessGetData(pfrom, state, chainparams.GetConsensus(), connman, interruptMsgProc, avoid_locking)) {
+
+        if (!ProcessGetData(pfrom, nodestate, chainparams.GetConsensus(), connman, interruptMsgProc, avoid_locking)) {
             return PROCESS_MESSAGES_MORE_WITH_MAIN;
         }
+
+        if (pfrom->fDisconnect)
+            return 0;
+
+        // this maintains the order of responses
+        if (!pfrom->vRecvGetData.empty()) return PROCESS_MESSAGES_MORE_AVAILABLE;
+
+        if (!ProcessInv(pfrom, nodestate, connman, interruptMsgProc, avoid_locking)) {
+            return PROCESS_MESSAGES_MORE_WITH_MAIN;
+        }
+        if (!nodestate->m_invs_to_process.empty()) return PROCESS_MESSAGES_MORE_AVAILABLE;
     }
-
-    if (pfrom->fDisconnect)
-        return 0;
-
-    // this maintains the order of responses
-    if (!pfrom->vRecvGetData.empty()) return PROCESS_MESSAGES_MORE_AVAILABLE;
 
     // Don't bother if send buffer is too full to respond anyway
     if (pfrom->fPauseSend)
@@ -2908,6 +2957,7 @@ unsigned int ProcessMessages(CNode* pfrom, CConnman& connman, const std::atomic<
                 strCommand != NetMsgType::ADDR &&
                 strCommand != NetMsgType::SENDHEADERS &&
                 strCommand != NetMsgType::SENDCMPCT &&
+                strCommand != NetMsgType::INV &&
                 strCommand != NetMsgType::GETDATA &&
                 strCommand != NetMsgType::GETADDR &&
                 strCommand != NetMsgType::MEMPOOL &&
@@ -3030,6 +3080,10 @@ unsigned int ProcessMessages(CNode* pfrom, CConnman& connman, const std::atomic<
     }
 
     if (!ProcessGetData(pfrom, nodestate, chainparams.GetConsensus(), connman, interruptMsgProc, avoid_locking)) {
+        return PROCESS_MESSAGES_MORE_WITH_MAIN;
+    }
+
+    if (!ProcessInv(pfrom, nodestate, connman, interruptMsgProc, avoid_locking)) {
         return PROCESS_MESSAGES_MORE_WITH_MAIN;
     }
 
