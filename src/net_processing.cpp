@@ -131,10 +131,11 @@ namespace {
     /** Number of peers from which we're downloading blocks. */
     int nPeersWithValidatedDownloads = 0;
 
-    /** Relay map, protected by cs_main. */
+    /** Relay map, protected by cs_mapRelay. */
     typedef std::map<uint256, CTransactionRef> MapRelay;
+    CCriticalSection cs_mapRelay;
     MapRelay mapRelay;
-    /** Expiration-time ordered list of (expire time, relay map entry) pairs, protected by cs_main). */
+    /** Expiration-time ordered list of (expire time, relay map entry) pairs, protected by cs_mapRelay). */
     std::deque<std::pair<int64_t, MapRelay::iterator>> vRelayExpiration;
 } // namespace
 
@@ -1135,7 +1136,6 @@ static void RelayAddress(const CAddress& addr, bool fReachable, CConnman& connma
 
 void static ProcessGetData(CNode* pfrom, NodeStateAccessor& nodestate, const Consensus::Params& consensusParams, CConnman& connman, const std::atomic<bool>& interruptMsgProc)
 {
-    AssertLockHeld(cs_main);
     assert(pfrom->GetId() == nodestate->m_id);
 
     std::deque<CInv>::iterator it = pfrom->vRecvGetData.begin();
@@ -1156,6 +1156,8 @@ void static ProcessGetData(CNode* pfrom, NodeStateAccessor& nodestate, const Con
 
             if (inv.type == MSG_BLOCK || inv.type == MSG_FILTERED_BLOCK || inv.type == MSG_CMPCT_BLOCK || inv.type == MSG_WITNESS_BLOCK)
             {
+                LOCK(cs_main);
+
                 bool send = false;
                 BlockMap::iterator mi = mapBlockIndex.find(inv.hash);
                 std::shared_ptr<const CBlock> a_recent_block;
@@ -1284,14 +1286,18 @@ void static ProcessGetData(CNode* pfrom, NodeStateAccessor& nodestate, const Con
             }
             else if (inv.type == MSG_TX || inv.type == MSG_WITNESS_TX)
             {
-                // Send stream from relay memory
                 bool push = false;
-                auto mi = mapRelay.find(inv.hash);
                 int nSendFlags = (inv.type == MSG_TX ? SERIALIZE_TRANSACTION_NO_WITNESS : 0);
-                if (mi != mapRelay.end()) {
-                    connman.PushMessage(pfrom, msgMaker.Make(nSendFlags, NetMsgType::TX, *mi->second));
-                    push = true;
-                } else if (pfrom->timeLastMempoolReq) {
+                {
+                    // Send stream from relay memory
+                    LOCK(cs_mapRelay);
+                    auto mi = mapRelay.find(inv.hash);
+                    if (mi != mapRelay.end()) {
+                        connman.PushMessage(pfrom, msgMaker.Make(nSendFlags, NetMsgType::TX, *mi->second));
+                        push = true;
+                    }
+                }
+                if (!push && pfrom->timeLastMempoolReq) {
                     auto txinfo = mempool.info(inv.hash);
                     // To protect privacy, do not answer getdata using the mempool when
                     // that TX couldn't have been INVed in reply to a MEMPOOL request.
@@ -1768,7 +1774,6 @@ bool static ProcessMessage(CNode* pfrom, NodeStateAccessor& nodestate, const std
         }
 
         pfrom->vRecvGetData.insert(pfrom->vRecvGetData.end(), vInv.begin(), vInv.end());
-        LOCK(cs_main);
         ProcessGetData(pfrom, nodestate, chainparams.GetConsensus(), connman, interruptMsgProc);
     }
 
@@ -2870,7 +2875,6 @@ bool ProcessMessages(CNode* pfrom, CConnman& connman, const std::atomic<bool>& i
 
     if (!pfrom->vRecvGetData.empty()) {
         NodeStateAccessor state = State(pfrom->GetId());
-        LOCK(cs_main);
         ProcessGetData(pfrom, state, chainparams.GetConsensus(), connman, interruptMsgProc);
     }
 
@@ -3391,6 +3395,7 @@ bool SendMessages(CNode* pto, CConnman& connman, const std::atomic<bool>& interr
                     vInv.push_back(CInv(MSG_TX, hash));
                     nRelayedTransactions++;
                     {
+                        LOCK(cs_mapRelay);
                         // Expire old relay messages
                         while (!vRelayExpiration.empty() && vRelayExpiration.front().first < nNow)
                         {
