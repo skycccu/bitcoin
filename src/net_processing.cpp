@@ -229,6 +229,12 @@ struct CNodeState {
     std::vector<CInv> m_invs_to_process;
 
     /**
+     * A pending BlockTransactionsRequest to respond to
+     * (obviously must be filled before other messages are responded to)
+     */
+    std::unique_ptr<BlockTransactionsRequest> m_block_txns_to_provide;
+
+    /**
      * If this node is waiting on validationinterface callbacks to complete before it can make more progress.
      */
     bool m_awaiting_callback_completion;
@@ -1458,6 +1464,38 @@ inline void static SendBlockTransactions(const CBlock& block, const BlockTransac
     connman.PushMessage(pfrom, msgMaker.Make(nSendFlags, NetMsgType::BLOCKTXN, resp));
 }
 
+void static RespondToBlockTransactions(CNode* pfrom, NodeStateAccessor& nodestate, const Consensus::Params& consensusParams, CConnman& connman, const BlockTransactionsRequest& req) {
+    LOCK(cs_main);
+
+    BlockMap::iterator it = mapBlockIndex.find(req.blockhash);
+    if (it == mapBlockIndex.end() || !(it->second->nStatus & BLOCK_HAVE_DATA)) {
+        LogPrintf("Peer %d sent us a getblocktxn for a block we don't have", pfrom->GetId());
+        return;
+    }
+
+    if (it->second->nHeight < chainActive.Height() - MAX_BLOCKTXN_DEPTH) {
+        // If an older block is requested (should never happen in practice,
+        // but can happen in tests) send a block response instead of a
+        // blocktxn response. Sending a full block response instead of a
+        // small blocktxn response is preferable in the case where a peer
+        // might maliciously send lots of getblocktxn requests to trigger
+        // expensive disk reads, because it will require the peer to
+        // actually receive all the data read from disk over the network.
+        LogPrint(BCLog::NET, "Peer %d sent us a getblocktxn for a block > %i deep", pfrom->GetId(), MAX_BLOCKTXN_DEPTH);
+        CInv inv;
+        inv.type = nodestate->fWantsCmpctWitness ? MSG_WITNESS_BLOCK : MSG_BLOCK;
+        inv.hash = req.blockhash;
+        pfrom->vRecvGetData.push_back(inv);
+        return;
+    }
+
+    CBlock block;
+    bool ret = ReadBlockFromDisk(block, it->second, consensusParams);
+    assert(ret);
+
+    SendBlockTransactions(block, req, nodestate, pfrom, connman);
+}
+
 bool static ProcessMessage(CNode* pfrom, NodeStateAccessor& nodestate, const std::string& strCommand, CDataStream& vRecv, int64_t nTimeReceived, const CChainParams& chainparams, CConnman& connman, const std::atomic<bool>& interruptMsgProc, std::map<NodeId, int>& other_node_ban_map)
 {
     LogPrint(BCLog::NET, "received: %s (%u bytes) peer=%d\n", SanitizeString(strCommand), vRecv.size(), pfrom->GetId());
@@ -1888,52 +1926,23 @@ bool static ProcessMessage(CNode* pfrom, NodeStateAccessor& nodestate, const std
 
     else if (strCommand == NetMsgType::GETBLOCKTXN)
     {
-        BlockTransactionsRequest req;
-        vRecv >> req;
+        assert(!nodestate->m_block_txns_to_provide);
+        nodestate->m_block_txns_to_provide.reset(new BlockTransactionsRequest());
+        vRecv >> *nodestate->m_block_txns_to_provide;
 
         std::shared_ptr<const CBlock> recent_block;
         {
             LOCK(cs_most_recent_block);
-            if (most_recent_block_hash == req.blockhash)
+            if (most_recent_block_hash == nodestate->m_block_txns_to_provide->blockhash)
                 recent_block = most_recent_block;
             // Avoid holding cs_most_recent_block too long
         }
 
         if (recent_block) {
-            SendBlockTransactions(*recent_block, req, nodestate, pfrom, connman);
+            SendBlockTransactions(*recent_block, *nodestate->m_block_txns_to_provide, nodestate, pfrom, connman);
+            nodestate->m_block_txns_to_provide.reset();
             return true;
         }
-
-        LOCK(cs_main);
-
-        BlockMap::iterator it = mapBlockIndex.find(req.blockhash);
-        if (it == mapBlockIndex.end() || !(it->second->nStatus & BLOCK_HAVE_DATA)) {
-            LogPrintf("Peer %d sent us a getblocktxn for a block we don't have", pfrom->GetId());
-            return true;
-        }
-
-        if (it->second->nHeight < chainActive.Height() - MAX_BLOCKTXN_DEPTH) {
-            // If an older block is requested (should never happen in practice,
-            // but can happen in tests) send a block response instead of a
-            // blocktxn response. Sending a full block response instead of a
-            // small blocktxn response is preferable in the case where a peer
-            // might maliciously send lots of getblocktxn requests to trigger
-            // expensive disk reads, because it will require the peer to
-            // actually receive all the data read from disk over the network.
-            LogPrint(BCLog::NET, "Peer %d sent us a getblocktxn for a block > %i deep", pfrom->GetId(), MAX_BLOCKTXN_DEPTH);
-            CInv inv;
-            inv.type = nodestate->fWantsCmpctWitness ? MSG_WITNESS_BLOCK : MSG_BLOCK;
-            inv.hash = req.blockhash;
-            pfrom->vRecvGetData.push_back(inv);
-            ProcessGetData(pfrom, nodestate, chainparams.GetConsensus(), connman, interruptMsgProc);
-            return true;
-        }
-
-        CBlock block;
-        bool ret = ReadBlockFromDisk(block, it->second, chainparams.GetConsensus());
-        assert(ret);
-
-        SendBlockTransactions(block, req, nodestate, pfrom, connman);
     }
 
 
@@ -2922,6 +2931,11 @@ unsigned int ProcessMessages(CNode* pfrom, CConnman& connman, const std::atomic<
             return 0;
         }
 
+        if (nodestate->m_block_txns_to_provide) {
+            if (avoid_locking) return PROCESS_MESSAGES_MORE_WITH_MAIN;
+            RespondToBlockTransactions(pfrom, nodestate, chainparams.GetConsensus(), connman, *nodestate->m_block_txns_to_provide);
+            nodestate->m_block_txns_to_provide.reset();
+        }
 
         if (!ProcessGetData(pfrom, nodestate, chainparams.GetConsensus(), connman, interruptMsgProc, avoid_locking)) {
             return PROCESS_MESSAGES_MORE_WITH_MAIN;
@@ -2959,6 +2973,7 @@ unsigned int ProcessMessages(CNode* pfrom, CConnman& connman, const std::atomic<
                 strCommand != NetMsgType::SENDCMPCT &&
                 strCommand != NetMsgType::INV &&
                 strCommand != NetMsgType::GETDATA &&
+                strCommand != NetMsgType::GETBLOCKTXN &&
                 strCommand != NetMsgType::GETADDR &&
                 strCommand != NetMsgType::MEMPOOL &&
                 strCommand != NetMsgType::PING &&
@@ -3077,6 +3092,12 @@ unsigned int ProcessMessages(CNode* pfrom, CConnman& connman, const std::atomic<
         });
     } else {
         SendRejectsAndCheckIfBanned(pfrom, nodestate, connman);
+    }
+
+    if (nodestate->m_block_txns_to_provide) {
+        if (avoid_locking) return PROCESS_MESSAGES_MORE_WITH_MAIN;
+        RespondToBlockTransactions(pfrom, nodestate, chainparams.GetConsensus(), connman, *nodestate->m_block_txns_to_provide);
+        nodestate->m_block_txns_to_provide.reset();
     }
 
     if (!ProcessGetData(pfrom, nodestate, chainparams.GetConsensus(), connman, interruptMsgProc, avoid_locking)) {
