@@ -11,6 +11,9 @@
 #include <boost/thread/condition_variable.hpp>
 #include <boost/thread/mutex.hpp>
 #include <boost/thread/recursive_mutex.hpp>
+#include <condition_variable>
+#include <thread>
+#include <mutex>
 
 
 ////////////////////////////////////////////////
@@ -88,7 +91,7 @@ void static inline DeleteLock(void* cs) {}
  * Wrapped boost mutex: supports recursive locking, but no waiting
  * TODO: We should move away from using the recursive lock by default.
  */
-class CCriticalSection : public AnnotatedMixin<boost::recursive_mutex>
+class CCriticalSection : public AnnotatedMixin<std::recursive_mutex>
 {
 public:
     ~CCriticalSection() {
@@ -97,13 +100,13 @@ public:
 };
 
 /** Wrapped boost mutex: supports waiting but not recursive locking */
-typedef AnnotatedMixin<boost::mutex> CWaitableCriticalSection;
+typedef AnnotatedMixin<std::mutex> CWaitableCriticalSection;
 
 /** Lock for CConditionVariable */
-typedef boost::unique_lock<boost::mutex> CWaitableLock;
+typedef std::unique_lock<std::mutex> CWaitableLock;
 
-/** Just a typedef for boost::condition_variable, can be wrapped later if desired */
-typedef boost::condition_variable CConditionVariable;
+/** Just a typedef for std::condition_variable, can be wrapped later if desired */
+typedef std::condition_variable CConditionVariable;
 
 #ifdef DEBUG_LOCKCONTENTION
 void PrintLockContention(const char* pszName, const char* pszFile, int nLine);
@@ -113,9 +116,9 @@ void PrintLockContention(const char* pszName, const char* pszFile, int nLine);
 class SCOPED_LOCKABLE CCriticalBlock
 {
 private:
-    boost::unique_lock<CCriticalSection> lock;
+    std::unique_lock<CCriticalSection> lock;
 
-    void Enter(const char* pszName, const char* pszFile, int nLine) NO_THREAD_SAFETY_ANALYSIS
+    void Enter(const char* pszName, const char* pszFile, int nLine)
     {
         EnterCritical(pszName, pszFile, nLine, (void*)(lock.mutex()));
 #ifdef DEBUG_LOCKCONTENTION
@@ -128,7 +131,7 @@ private:
 #endif
     }
 
-    bool TryEnter(const char* pszName, const char* pszFile, int nLine) NO_THREAD_SAFETY_ANALYSIS
+    bool TryEnter(const char* pszName, const char* pszFile, int nLine)
     {
         EnterCritical(pszName, pszFile, nLine, (void*)(lock.mutex()), true);
         lock.try_lock();
@@ -138,7 +141,7 @@ private:
     }
 
 public:
-    CCriticalBlock(CCriticalSection& mutexIn, const char* pszName, const char* pszFile, int nLine, bool fTry = false) EXCLUSIVE_LOCK_FUNCTION(mutexIn) : lock(mutexIn, boost::defer_lock)
+    CCriticalBlock(CCriticalSection& mutexIn, const char* pszName, const char* pszFile, int nLine, bool fTry = false) EXCLUSIVE_LOCK_FUNCTION(mutexIn) : lock(mutexIn, std::defer_lock)
     {
         if (fTry)
             TryEnter(pszName, pszFile, nLine);
@@ -150,7 +153,7 @@ public:
     {
         if (!pmutexIn) return;
 
-        lock = boost::unique_lock<CCriticalSection>(*pmutexIn, boost::defer_lock);
+        lock = std::unique_lock<CCriticalSection>(*pmutexIn, std::defer_lock);
         if (fTry)
             TryEnter(pszName, pszFile, nLine);
         else
