@@ -107,11 +107,10 @@ void PrintLockContention(const char* pszName, const char* pszFile, int nLine);
 #endif
 
 /** Wrapper around boost::unique_lock<Mutex> */
-template <typename Mutex>
-class SCOPED_LOCKABLE CMutexLock
+class SCOPED_LOCKABLE CCriticalBlock
 {
 private:
-    boost::unique_lock<Mutex> lock;
+    boost::unique_lock<CCriticalSection> lock;
 
     void Enter(const char* pszName, const char* pszFile, int nLine) NO_THREAD_SAFETY_ANALYSIS
     {
@@ -136,7 +135,7 @@ private:
     }
 
 public:
-    CMutexLock(Mutex& mutexIn, const char* pszName, const char* pszFile, int nLine, bool fTry = false) EXCLUSIVE_LOCK_FUNCTION(mutexIn) : lock(mutexIn, boost::defer_lock)
+    CCriticalBlock(CCriticalSection& mutexIn, const char* pszName, const char* pszFile, int nLine, bool fTry = false) EXCLUSIVE_LOCK_FUNCTION(mutexIn) : lock(mutexIn, boost::defer_lock)
     {
         if (fTry)
             TryEnter(pszName, pszFile, nLine);
@@ -144,18 +143,18 @@ public:
             Enter(pszName, pszFile, nLine);
     }
 
-    CMutexLock(Mutex* pmutexIn, const char* pszName, const char* pszFile, int nLine, bool fTry = false) EXCLUSIVE_LOCK_FUNCTION(pmutexIn)
+    CCriticalBlock(CCriticalSection* pmutexIn, const char* pszName, const char* pszFile, int nLine, bool fTry = false) EXCLUSIVE_LOCK_FUNCTION(pmutexIn)
     {
         if (!pmutexIn) return;
 
-        lock = boost::unique_lock<Mutex>(*pmutexIn, boost::defer_lock);
+        lock = boost::unique_lock<CCriticalSection>(*pmutexIn, boost::defer_lock);
         if (fTry)
             TryEnter(pszName, pszFile, nLine);
         else
             Enter(pszName, pszFile, nLine);
     }
 
-    ~CMutexLock() UNLOCK_FUNCTION()
+    ~CCriticalBlock() UNLOCK_FUNCTION()
     {
         if (lock.owns_lock())
             LeaveCritical();
@@ -166,8 +165,6 @@ public:
         return lock.owns_lock();
     }
 };
-
-typedef CMutexLock<CCriticalSection> CCriticalBlock;
 
 #define PASTE(x, y) x ## y
 #define PASTE2(x, y) PASTE(x, y)
