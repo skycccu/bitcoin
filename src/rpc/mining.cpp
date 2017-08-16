@@ -474,7 +474,7 @@ UniValue getblocktemplate(const JSONRPCRequest& request)
         {
             checktxtime = boost::get_system_time() + boost::posix_time::minutes(1);
 
-            boost::unique_lock<boost::mutex> lock(csBestBlock);
+            CWaitableLock lock(csBestBlock);
             while (chainActive.Tip()->GetBlockHash() == hashWatchedChain && IsRPCRunning())
             {
                 if (!cvBlockChange.timed_wait(lock, checktxtime))
