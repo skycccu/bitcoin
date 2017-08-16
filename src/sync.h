@@ -113,7 +113,7 @@ class SCOPED_LOCKABLE CMutexLock
 private:
     boost::unique_lock<Mutex> lock;
 
-    void Enter(const char* pszName, const char* pszFile, int nLine)
+    void Enter(const char* pszName, const char* pszFile, int nLine) NO_THREAD_SAFETY_ANALYSIS
     {
         EnterCritical(pszName, pszFile, nLine, (void*)(lock.mutex()));
 #ifdef DEBUG_LOCKCONTENTION
@@ -126,7 +126,7 @@ private:
 #endif
     }
 
-    bool TryEnter(const char* pszName, const char* pszFile, int nLine)
+    bool TryEnter(const char* pszName, const char* pszFile, int nLine) NO_THREAD_SAFETY_ANALYSIS
     {
         EnterCritical(pszName, pszFile, nLine, (void*)(lock.mutex()), true);
         lock.try_lock();
